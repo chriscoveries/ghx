@@ -337,7 +337,7 @@ log_file: ~/.ghx/ghxd.log
 
 ## GitHub CLI Resolution and Auto-Download
 
-`ghx` does not require the GitHub CLI (`gh`) to be pre-installed. When `gh` is needed, it is resolved using the `internal/ghcli` package with the following priority:
+`ghx` does not require the GitHub CLI (`gh`) to be pre-installed. When `gh` is needed, it is resolved using the `src/internal/ghcli` package with the following priority:
 
 ### Resolution Order
 
@@ -425,67 +425,71 @@ Staleness checks only apply to the managed binary. If `gh` was found in PATH or 
 
 ```
 ghx/
-├── cmd/
-│   ├── ghx/                # CLI client entry point
-│   │   ├── main.go
-│   │   ├── proc_unix.go    # Unix process management (build-tagged)
-│   │   └── proc_windows.go # Windows process management (build-tagged)
-│   └── ghxd/               # Daemon entry point
-│       └── main.go
-├── internal/
-│   ├── allowlist/           # Command classification
-│   │   ├── allowlist.go
-│   │   └── allowlist_test.go
-│   ├── cache/               # LRU cache with TTL
-│   │   ├── cache.go
-│   │   └── cache_test.go
-│   ├── client/              # IPC client
-│   │   └── client.go
-│   ├── config/              # Configuration loading
-│   │   ├── config.go
-│   │   ├── config_test.go
-│   │   ├── dir_unix.go      # Unix default paths (build-tagged)
-│   │   └── dir_windows.go   # Windows default paths (build-tagged)
-│   ├── context/             # Execution context resolution
-│   │   └── resolve.go
-│   ├── daemon/              # Daemon server, request handling
-│   │   ├── server.go
-│   │   ├── handler.go       # Includes inline singleflight coalescing
-│   │   ├── platform_unix.go
-│   │   └── platform_windows.go
-│   ├── dashboard/           # Web dashboard (embedded HTML)
-│   │   ├── dashboard.go
-│   │   └── static/
-│   ├── executor/            # gh command execution
-│   │   ├── executor.go
-│   │   └── executor_test.go
-│   ├── ghcli/               # gh binary resolution and auto-download
-│   │   ├── resolve.go
-│   │   ├── resolve_test.go
-│   │   ├── shim.go
-│   │   ├── shim_test.go
-│   │   ├── download.go
-│   │   └── download_test.go
-│   ├── ipc/                 # Platform-specific IPC transport
-│   │   ├── ipc_unix.go      # Unix domain sockets (build-tagged)
-│   │   └── ipc_windows.go   # Named pipes via go-winio (build-tagged)
-│   ├── metrics/             # Counters, stats, JSON API
-│   │   ├── metrics.go
-│   │   └── metrics_test.go
-│   └── protocol/            # Length-prefixed JSON IPC protocol
-│       └── protocol.go
+├── src/
+│   ├── cmd/
+│   │   ├── ghx/                # CLI client entry point
+│   │   │   ├── main.go
+│   │   │   ├── proc_unix.go    # Unix process management (build-tagged)
+│   │   │   └── proc_windows.go # Windows process management (build-tagged)
+│   │   └── ghxd/               # Daemon entry point
+│   │       └── main.go
+│   └── internal/
+│       ├── allowlist/           # Command classification
+│       │   ├── allowlist.go
+│       │   └── allowlist_test.go
+│       ├── cache/               # LRU cache with TTL
+│       │   ├── cache.go
+│       │   └── cache_test.go
+│       ├── client/              # IPC client
+│       │   └── client.go
+│       ├── config/              # Configuration loading
+│       │   ├── config.go
+│       │   ├── config_test.go
+│       │   ├── dir_unix.go      # Unix default paths (build-tagged)
+│       │   └── dir_windows.go   # Windows default paths (build-tagged)
+│       ├── context/             # Execution context resolution
+│       │   └── resolve.go
+│       ├── daemon/              # Daemon server, request handling
+│       │   ├── server.go
+│       │   ├── handler.go       # Includes inline singleflight coalescing
+│       │   ├── platform_unix.go
+│       │   └── platform_windows.go
+│       ├── dashboard/           # Web dashboard (embedded HTML)
+│       │   ├── dashboard.go
+│       │   └── static/
+│       ├── executor/            # gh command execution
+│       │   ├── executor.go
+│       │   └── executor_test.go
+│       ├── ghcli/               # gh binary resolution and auto-download
+│       │   ├── resolve.go
+│       │   ├── resolve_test.go
+│       │   ├── shim.go
+│       │   ├── shim_test.go
+│       │   ├── download.go
+│       │   └── download_test.go
+│       ├── ipc/                 # Platform-specific IPC transport
+│       │   ├── ipc_unix.go      # Unix domain sockets (build-tagged)
+│       │   └── ipc_windows.go   # Named pipes via go-winio (build-tagged)
+│       ├── metrics/             # Counters, stats, JSON API
+│       │   ├── metrics.go
+│       │   └── metrics_test.go
+│       └── protocol/            # Length-prefixed JSON IPC protocol
+│           └── protocol.go
 ├── agent-plugin/            # Claude Code / Copilot CLI plugin
 │   ├── bin/                 # Shell wrapper scripts (lazy-install)
 │   ├── scripts/             # Install scripts (OS/arch auto-detect)
 │   └── skills/              # Agent skill definitions
 ├── docs/                    # GitHub Pages site
 │   └── index.html
+├── specs/                   # Project specs & docs
+│   ├── ADR.md
+│   ├── DOCS.md
+│   └── SPEC.md
 ├── install.sh               # Unix installer (curl | sh)
 ├── install.ps1              # Windows installer (irm | iex)
 ├── go.mod
 ├── go.sum
 ├── Makefile
-├── SPEC.md
 └── README.md
 ```
 
