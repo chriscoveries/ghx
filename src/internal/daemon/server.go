@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strconv"
 	"sync"
@@ -29,15 +30,16 @@ const ghPathRefreshInterval = 1 * time.Minute
 
 // Server is the ghxd daemon.
 type Server struct {
-	cfg     *config.Config
-	cache   *cache.Cache
-	stats   *metrics.Stats
-	handler *Handler
-	ln      net.Listener
-	httpSrv *http.Server
-	done    chan struct{}
-	wg      sync.WaitGroup
-	version string
+	cfg          *config.Config
+	cache        *cache.Cache
+	stats        *metrics.Stats
+	handler      *Handler
+	ln           net.Listener
+	httpSrv      *http.Server
+	done         chan struct{}
+	wg           sync.WaitGroup
+	version      string
+	shutdownOnce sync.Once
 }
 
 // NewServer creates a new daemon server.
@@ -67,12 +69,18 @@ func (s *Server) Run() error {
 	}
 
 	// Ensure only one daemon owns the socket path to avoid corrupted IPC writes.
-	if err := ensureSingleInstance(s.cfg.PIDFile); err != nil {
+	lock, err := acquireInstanceLock(s.cfg.SocketPath)
+	if err != nil {
 		return fmt.Errorf("single-instance check: %w", err)
+	}
+	if lock != nil {
+		defer lock.Close()
 	}
 
 	// Remove stale socket (no-op on Windows)
-	removeStaleSocket(s.cfg.SocketPath)
+	if err := removeStaleSocket(s.cfg.SocketPath); err != nil {
+		return fmt.Errorf("socket cleanup: %w", err)
+	}
 
 	// Start IPC listener (Unix socket or Windows named pipe)
 	ln, err := ipc.Listen(s.cfg.SocketPath)
@@ -80,6 +88,7 @@ func (s *Server) Run() error {
 		return fmt.Errorf("listen: %w", err)
 	}
 	s.ln = ln
+	defer ln.Close()
 
 	// Set socket permissions (no-op on Windows)
 	if err := setSocketPermissions(s.cfg.SocketPath); err != nil {
@@ -102,6 +111,7 @@ func (s *Server) Run() error {
 	// Handle signals
 	sigCh := make(chan os.Signal, 1)
 	notifyShutdownSignals(sigCh)
+	defer signal.Stop(sigCh)
 
 	go func() {
 		select {
@@ -112,7 +122,7 @@ func (s *Server) Run() error {
 		}
 	}()
 
-	log.Printf("ghxd started (socket: %s", s.cfg.SocketPath)
+	log.Printf("ghxd started (socket: %s)", s.cfg.SocketPath)
 	if s.cfg.DashboardPort != 0 {
 		log.Printf("  dashboard: http://127.0.0.1:%d/", s.cfg.DashboardPort)
 	}
@@ -264,26 +274,20 @@ func (s *Server) startHTTP() {
 
 // Shutdown gracefully stops the daemon.
 func (s *Server) Shutdown() {
-	select {
-	case <-s.done:
-		return // already shutting down
-	default:
+	s.shutdownOnce.Do(func() {
 		close(s.done)
-	}
 
-	// Stop HTTP server
-	if s.httpSrv != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		s.httpSrv.Shutdown(ctx)
-	}
-
-	// Stop accepting connections
-	if s.ln != nil {
-		s.ln.Close()
-	}
-
-	log.Println("ghxd shutdown complete")
+		// Stop accepting IPC before waiting for HTTP shutdown.
+		if s.ln != nil {
+			s.ln.Close()
+		}
+		if s.httpSrv != nil {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			s.httpSrv.Shutdown(ctx)
+		}
+		log.Println("ghxd shutdown requested")
+	})
 }
 
 func (s *Server) writePIDFile() error {
