@@ -40,6 +40,7 @@ type Server struct {
 	wg           sync.WaitGroup
 	version      string
 	shutdownOnce sync.Once
+	lifecycleMu  sync.Mutex
 }
 
 // NewServer creates a new daemon server.
@@ -87,8 +88,16 @@ func (s *Server) Run() error {
 	if err != nil {
 		return fmt.Errorf("listen: %w", err)
 	}
-	s.ln = ln
 	defer ln.Close()
+	s.lifecycleMu.Lock()
+	select {
+	case <-s.done:
+		s.lifecycleMu.Unlock()
+		return nil
+	default:
+		s.ln = ln
+	}
+	s.lifecycleMu.Unlock()
 
 	// Set socket permissions (no-op on Windows)
 	if err := setSocketPermissions(s.cfg.SocketPath); err != nil {
@@ -263,13 +272,23 @@ func (s *Server) startHTTP() {
 		}()
 	})
 
-	s.httpSrv = &http.Server{
+	httpSrv := &http.Server{
 		Addr:    fmt.Sprintf("127.0.0.1:%d", s.cfg.DashboardPort),
 		Handler: mux,
 	}
 
+	s.lifecycleMu.Lock()
+	select {
+	case <-s.done:
+		s.lifecycleMu.Unlock()
+		return
+	default:
+		s.httpSrv = httpSrv
+	}
+	s.lifecycleMu.Unlock()
+
 	go func() {
-		if err := s.httpSrv.ListenAndServe(); err != http.ErrServerClosed {
+		if err := httpSrv.ListenAndServe(); err != http.ErrServerClosed {
 			log.Printf("HTTP server error: %v", err)
 		}
 	}()
@@ -280,14 +299,18 @@ func (s *Server) Shutdown() {
 	s.shutdownOnce.Do(func() {
 		close(s.done)
 
+		s.lifecycleMu.Lock()
+		ln, httpSrv := s.ln, s.httpSrv
+		s.lifecycleMu.Unlock()
+
 		// Stop accepting IPC before waiting for HTTP shutdown.
-		if s.ln != nil {
-			s.ln.Close()
+		if ln != nil {
+			ln.Close()
 		}
-		if s.httpSrv != nil {
+		if httpSrv != nil {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
-			s.httpSrv.Shutdown(ctx)
+			httpSrv.Shutdown(ctx)
 		}
 		log.Println("ghxd shutdown requested")
 	})
