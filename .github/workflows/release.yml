@@ -21,7 +21,7 @@ jobs:
           go-version-file: go.mod
 
       - name: Run tests
-        run: go test -race ./...
+        run: go test -race -count=1 ./...
 
       - name: Build release archives and checksums
         id: build
