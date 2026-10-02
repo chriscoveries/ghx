@@ -14,6 +14,7 @@ const (
 	ResultMiss        RequestResult = "miss"
 	ResultPassthrough RequestResult = "passthrough"
 	ResultCoalesced   RequestResult = "coalesced"
+	ResultRevalidated RequestResult = "revalidated"
 )
 
 // LogEntry records a single request in the log.
@@ -31,6 +32,7 @@ type CommandStats struct {
 	Misses         int64   `json:"misses"`
 	Passthrough    int64   `json:"passthrough"`
 	Coalesced      int64   `json:"coalesced"`
+	Revalidated    int64   `json:"revalidated"`
 	TotalLatencyMs float64 `json:"total_latency_ms"`
 	RequestCount   int64   `json:"request_count"`
 }
@@ -52,6 +54,7 @@ type Stats struct {
 	misses        int64
 	passthrough   int64
 	coalesced     int64
+	revalidated   int64
 	evictions     int64
 	invalidations int64
 	commands      map[string]*CommandStats
@@ -95,6 +98,11 @@ func (s *Stats) Record(cmdKey string, cacheKey string, result RequestResult, lat
 	case ResultHit:
 		s.hits++
 		cs.Hits++
+	case ResultRevalidated:
+		s.hits++
+		cs.Hits++
+		s.revalidated++
+		cs.Revalidated++
 	case ResultMiss:
 		s.misses++
 		cs.Misses++
@@ -160,6 +168,7 @@ type Snapshot struct {
 	Misses        int64                    `json:"misses"`
 	Passthrough   int64                    `json:"passthrough"`
 	Coalesced     int64                    `json:"coalesced"`
+	Revalidated   int64                    `json:"revalidated"`
 	Evictions     int64                    `json:"evictions"`
 	Invalidations int64                    `json:"invalidations"`
 	HitRate       float64                  `json:"hit_rate"`
@@ -195,6 +204,7 @@ func (s *Stats) Snapshot(cacheSize, maxCacheSize int) Snapshot {
 		Misses:        s.misses,
 		Passthrough:   s.passthrough,
 		Coalesced:     s.coalesced,
+		Revalidated:   s.revalidated,
 		Evictions:     s.evictions,
 		Invalidations: s.invalidations,
 		HitRate:       hitRate,

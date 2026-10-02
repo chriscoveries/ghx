@@ -1,0 +1,24 @@
+{
+  "input_sha256": "cf6328d05bdf4658d4b6e6fbfdd6e3aba53d2dee54b6bcc43decabe15948ceea",
+  "calls": 1953,
+  "observed_cached_calls": 11,
+  "known_resource_view_shapes": 566,
+  "ambiguous_api_calls": 545,
+  "potential_write_flushes": 759,
+  "ttl_seconds": 30,
+  "capacity": 1000,
+  "before_exact_hash_model": {
+    "reads": 1173,
+    "hits": 9,
+    "misses": 1164,
+    "hit_rate_percent": 0.7672634271099744
+  },
+  "after_exact_hash_model": {
+    "reads": 1173,
+    "hits": 8,
+    "misses": 1165,
+    "hit_rate_percent": 0.6820119352088662
+  },
+  "after_resource_hit_rate_percent": null,
+  "measurement_limit": "Opaque full-command hashes cannot identify shared resources, requested fields, completed attempts, validators, repository dependencies, response sizes, or command durations. Additional resource/immutable/304 hit rate is unmeasurable, not zero. Exact-hash results are conservative models, not observed deployment rates; possible writes flush both models globally."
+}

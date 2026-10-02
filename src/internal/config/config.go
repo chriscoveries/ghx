@@ -9,6 +9,8 @@ import (
 )
 
 type Config struct {
+	ResourceViews   bool                     `yaml:"resource_views"`
+	ImmutableTTL    time.Duration            `yaml:"immutable_ttl"`
 	TTL             time.Duration            `yaml:"ttl"`
 	TTLOverrides    map[string]time.Duration `yaml:"ttl_overrides"`
 	MaxCacheBytes   int64                    `yaml:"max_cache_bytes"`
@@ -25,6 +27,8 @@ type Config struct {
 func DefaultConfig() *Config {
 	ghxDir := defaultGHXDir()
 	return &Config{
+		ResourceViews:   true,
+		ImmutableTTL:    24 * time.Hour,
 		TTL:             30 * time.Second,
 		TTLOverrides:    make(map[string]time.Duration),
 		MaxCacheEntries: 1000,

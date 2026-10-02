@@ -68,3 +68,12 @@ func TestCoalescedCountsAsHit(t *testing.T) {
 		t.Errorf("coalesced=%d, want 1", snap.Coalesced)
 	}
 }
+
+func TestRevalidatedCountsAsBodyReuseButHasSeparateDiagnostic(t *testing.T) {
+	s := New()
+	s.Record("api_get", "key", ResultRevalidated, 1)
+	snap := s.Snapshot(1, 100)
+	if snap.Revalidated != 1 || snap.Hits != 1 || snap.HitRate != 100 || snap.Commands["api_get"].Revalidated != 1 || s.Log(1)[0].Result != ResultRevalidated {
+		t.Fatalf("revalidation diagnostic missing: %+v", snap)
+	}
+}

@@ -18,6 +18,7 @@ import (
 	"github.com/brunoborges/ghx/src/internal/ghcli"
 	"github.com/brunoborges/ghx/src/internal/metrics"
 	"github.com/brunoborges/ghx/src/internal/protocol"
+	"github.com/brunoborges/ghx/src/internal/resource"
 )
 
 // Handler processes incoming requests from clients.
@@ -118,9 +119,22 @@ func (h *Handler) handleExec(req *protocol.Request) *protocol.Response {
 	if cmdKey == "" {
 		cmdKey = sanitizeCmdKey(req.Args)
 	}
+	if h.cfg.ResourceViews && !req.NoCache && classification.Type == allowlist.Cacheable {
+		if shape := resource.Prepare(req.Context, req.Args); shape != nil {
+			// Native fallbacks are exact-key cached. Reuse them before another
+			// unsupported superset attempt on older CLI versions/permissions.
+			if e := h.cache.Get(execctx.CacheKey(req.Context, req.Args)); e != nil {
+				h.stats.Record(cmdKey, e.Key, metrics.ResultHit, time.Since(start).Seconds()*1000)
+				return &protocol.Response{Stdout: e.Stdout, Stderr: e.Stderr, ExitCode: e.ExitCode, Cached: true}
+			}
+			if response := h.handleResource(req, shape, classification); response != nil {
+				return response
+			}
+		}
+	}
 
 	// Non-cacheable: execute directly via daemon (captures output)
-	if classification.Type == allowlist.Passthrough || req.NoCache {
+	if classification.Type == allowlist.Passthrough || (req.NoCache && classification.Type != allowlist.Mutation) {
 		result := h.execGH(req.Args, req.WorkDir, req.AuthEnv)
 		latency := time.Since(start).Seconds() * 1000
 		h.stats.Record(cmdKey, "", metrics.ResultPassthrough, latency)
@@ -138,9 +152,8 @@ func (h *Handler) handleExec(req *protocol.Request) *protocol.Response {
 		latency := time.Since(start).Seconds() * 1000
 		h.stats.Record(cmdKey, "", metrics.ResultPassthrough, latency)
 
-		if classification.Resource != allowlist.ResourceUnknown {
-			count := h.cache.InvalidateNamespace(req.Context.Host, req.Context.Repo, classification.Resource)
-			h.stats.RecordInvalidation(count)
+		if result.ExitCode == 0 {
+			h.invalidateWrite(req)
 		}
 
 		return &protocol.Response{
@@ -151,6 +164,9 @@ func (h *Handler) handleExec(req *protocol.Request) *protocol.Response {
 	}
 
 	// Cacheable: check cache → singleflight → execute → store
+	if req.Args[0] == "api" && resource.ParseAPI(req.Args).Conditional {
+		return h.handleConditional(req)
+	}
 	cacheKey := execctx.CacheKey(req.Context, req.Args)
 
 	// Check cache
@@ -166,7 +182,18 @@ func (h *Handler) handleExec(req *protocol.Request) *protocol.Response {
 	}
 
 	// Singleflight: coalesce concurrent requests for the same key
-	result, coalesced := h.doSingleflight(cacheKey, req)
+	version := h.cache.Version()
+	result, coalesced := h.doSingleflightExec(fmt.Sprintf("%s/%d", cacheKey, version), func() *executor.Result {
+		if e := h.cache.Get(cacheKey); e != nil {
+			return &executor.Result{Stdout: e.Stdout, Stderr: e.Stderr, ExitCode: e.ExitCode}
+		}
+		r := h.execGH(req.Args, req.WorkDir, req.AuthEnv)
+		if r.ExitCode == 0 || (cmdKey == "pr_checks" && r.ExitCode == 8) {
+			d := resource.Identify(req.Context, req.Args)
+			h.cache.SetVersion(&cache.Entry{Key: cacheKey, Stdout: r.Stdout, Stderr: r.Stderr, ExitCode: r.ExitCode, CachedAt: time.Now(), TTL: h.requestTTL(req, cmdKey), Resource: allowlist.ResourceType(d.Kind), ResourceID: d.ID, Host: d.Host, Repo: d.Repo}, version)
+		}
+		return r
+	})
 	latency := time.Since(start).Seconds() * 1000
 
 	if coalesced {
@@ -175,24 +202,6 @@ func (h *Handler) handleExec(req *protocol.Request) *protocol.Response {
 		h.stats.Record(cmdKey, cacheKey, metrics.ResultMiss, latency)
 	}
 
-	// Store in cache
-	ttl := h.cfg.CommandTTL(cmdKey)
-	if req.TTLOverride > 0 {
-		ttl = time.Duration(req.TTLOverride) * time.Second
-	}
-
-	h.cache.Set(&cache.Entry{
-		Key:      cacheKey,
-		Stdout:   result.Stdout,
-		Stderr:   result.Stderr,
-		ExitCode: result.ExitCode,
-		CachedAt: time.Now(),
-		TTL:      ttl,
-		Resource: classification.Resource,
-		Host:     req.Context.Host,
-		Repo:     req.Context.Repo,
-	})
-
 	return &protocol.Response{
 		Stdout:   result.Stdout,
 		Stderr:   result.Stderr,
@@ -200,7 +209,7 @@ func (h *Handler) handleExec(req *protocol.Request) *protocol.Response {
 	}
 }
 
-func (h *Handler) doSingleflight(key string, req *protocol.Request) (*executor.Result, bool) {
+func (h *Handler) doSingleflightExec(key string, execute func() *executor.Result) (*executor.Result, bool) {
 	h.mu.Lock()
 	if c, ok := h.inflight[key]; ok {
 		h.mu.Unlock()
@@ -213,7 +222,7 @@ func (h *Handler) doSingleflight(key string, req *protocol.Request) (*executor.R
 	h.inflight[key] = c
 	h.mu.Unlock()
 
-	c.res = h.execGH(req.Args, req.WorkDir, req.AuthEnv)
+	c.res = execute()
 	c.wg.Done()
 
 	h.mu.Lock()
