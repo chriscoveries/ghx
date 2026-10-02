@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"crypto/sha256"
+	_ "embed"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -18,7 +19,19 @@ import (
 	"strings"
 )
 
-var platforms = []string{"darwin/arm64", "darwin/amd64", "linux/amd64", "linux/arm64", "windows/amd64", "windows/arm64"}
+//go:embed platforms.json
+var platformPolicy []byte
+
+var platforms = configuredPlatforms()
+
+func configuredPlatforms() []string {
+	var targets []string
+	if err := json.Unmarshal(platformPolicy, &targets); err != nil {
+		panic(fmt.Errorf("invalid platform policy: %w", err))
+	}
+	return targets
+}
+
 var versionPattern = regexp.MustCompile(`^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$`)
 
 type provenance struct {
