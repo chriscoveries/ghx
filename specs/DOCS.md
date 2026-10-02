@@ -474,6 +474,9 @@ ttl_overrides:
 # Max cached entries before LRU eviction (default: 1000)
 max_cache_entries: 1000
 
+# Max retained stdout + stderr bytes (default: 64 MiB)
+max_cache_bytes: 67108864
+
 # Dashboard HTTP port (default: 9847)
 dashboard_port: 9847
 
@@ -488,6 +491,13 @@ additional_cacheable:
 # Resolution order: this setting → PATH → ~/.ghx/bin/gh → auto-download
 # gh_path: /usr/local/bin/gh
 ```
+
+Both cache limits must be positive to retain responses. LRU eviction enforces both
+limits; oversized responses are returned normally but bypass storage. Replacing an
+entry with an oversized response discards its old value. `ghx xcache stats` and
+`/api/stats` report `cache_bytes`, `max_cache_bytes`, and `cache_rejected` so capacity
+pressure is visible. The byte limit covers response payloads; metadata is bounded
+separately by the entry limit, and executing commands still need working memory.
 
 ## Architecture
 
