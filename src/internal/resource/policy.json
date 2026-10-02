@@ -1,0 +1,12 @@
+{
+  "pr": {
+    "fields": "number,id,title,url,body,state,isDraft,createdAt,updatedAt,closedAt,mergedAt,headRefName,headRefOid,baseRefName,mergeStateStatus,mergeable,reviewDecision,statusCheckRollup,author,assignees,labels,comments,reviews,reviewRequests,mergeCommit,mergedBy,additions,deletions,changedFiles",
+    "immutable": ["number", "id", "createdAt", "mergedAt", "state", "mergeCommit", "mergedBy"]
+  },
+  "issue": {
+    "fields": "number,id,title,url,body,state,createdAt,updatedAt,closedAt,author,labels,assignees,milestone,comments"
+  },
+  "run": {
+    "fields": "databaseId,number,displayTitle,headBranch,headSha,event,status,conclusion,createdAt,startedAt,updatedAt,url,workflowName,workflowDatabaseId,jobs,attempt"
+  }
+}

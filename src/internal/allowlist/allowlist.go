@@ -1,6 +1,9 @@
 package allowlist
 
-import "strings"
+import (
+	"github.com/brunoborges/ghx/src/internal/resource"
+	"strings"
+)
 
 // CommandType classifies a gh command.
 type CommandType int
@@ -83,22 +86,29 @@ var cacheableCommands = map[string]ResourceType{
 
 // mutatingSubcommands trigger cache invalidation for their resource type.
 var mutatingActions = map[string]bool{
-	"create":   true,
-	"edit":     true,
-	"delete":   true,
-	"merge":    true,
-	"close":    true,
-	"reopen":   true,
-	"comment":  true,
-	"review":   true,
-	"approve":  true,
-	"ready":    true,
-	"lock":     true,
-	"unlock":   true,
-	"pin":      true,
-	"unpin":    true,
-	"transfer": true,
-	"set":      true,
+	"create":        true,
+	"edit":          true,
+	"delete":        true,
+	"merge":         true,
+	"close":         true,
+	"reopen":        true,
+	"comment":       true,
+	"review":        true,
+	"approve":       true,
+	"ready":         true,
+	"lock":          true,
+	"unlock":        true,
+	"pin":           true,
+	"unpin":         true,
+	"transfer":      true,
+	"set":           true,
+	"rerun":         true,
+	"cancel":        true,
+	"run":           true,
+	"enable":        true,
+	"disable":       true,
+	"update-branch": true,
+	"sync":          true,
 }
 
 var subcommandResourceMap = map[string]ResourceType{
@@ -214,17 +224,12 @@ func (c *Classifier) Classify(args []string) Classification {
 }
 
 func (c *Classifier) classifyAPI(args []string) Classification {
-	// gh api [flags] <endpoint>
-	// Only cache GET requests (default method is GET)
-	method := "GET"
-	for i, arg := range args {
-		if (arg == "-X" || arg == "--method") && i+1 < len(args) {
-			method = strings.ToUpper(args[i+1])
-		}
-	}
-
-	if method != "GET" {
+	a := resource.ParseAPI(args)
+	if a.Method != "GET" {
 		return Classification{Type: Mutation, Resource: ResourceAPI}
+	}
+	if !a.Valid {
+		return Classification{Type: Passthrough, Resource: ResourceAPI}
 	}
 
 	return Classification{

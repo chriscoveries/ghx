@@ -133,3 +133,19 @@ func TestAdditionalCacheable(t *testing.T) {
 		t.Errorf("additional cacheable 'variable list': cmdKey=%s, want variable_list", cl.CmdKey)
 	}
 }
+
+func TestAPIWritesAndRunMutationsCannotBeCached(t *testing.T) {
+	c := NewClassifier(nil)
+	for _, args := range [][]string{
+		{"api", "graphql", "-f", "query=mutation{}"},
+		{"api", "--method=POST", "repos/o/r/issues"},
+		{"api", "repos/o/r/issues", "-f", "title=value"},
+		{"api", "-XDELETE", "repos/o/r/issues/1"},
+		{"api", "repos/o/r/issues", "-HAuthorization: value", "--method=POST"},
+		{"run", "rerun", "1"}, {"run", "cancel", "1"}, {"workflow", "run", "build"},
+	} {
+		if got := c.Classify(args); got.Type != Mutation {
+			t.Errorf("%v: type=%v", args, got.Type)
+		}
+	}
+}

@@ -9,8 +9,11 @@ import (
 )
 
 type Config struct {
+	ResourceViews   bool                     `yaml:"resource_views"`
+	ImmutableTTL    time.Duration            `yaml:"immutable_ttl"`
 	TTL             time.Duration            `yaml:"ttl"`
 	TTLOverrides    map[string]time.Duration `yaml:"ttl_overrides"`
+	MaxCacheBytes   int64                    `yaml:"max_cache_bytes"`
 	MaxCacheEntries int                      `yaml:"max_cache_entries"`
 	SocketPath      string                   `yaml:"socket_path"`
 	PIDFile         string                   `yaml:"pid_file"`
@@ -24,9 +27,12 @@ type Config struct {
 func DefaultConfig() *Config {
 	ghxDir := defaultGHXDir()
 	return &Config{
+		ResourceViews:   true,
+		ImmutableTTL:    24 * time.Hour,
 		TTL:             30 * time.Second,
 		TTLOverrides:    make(map[string]time.Duration),
 		MaxCacheEntries: 1000,
+		MaxCacheBytes:   64 << 20,
 		SocketPath:      defaultSocketPath(ghxDir),
 		PIDFile:         filepath.Join(ghxDir, "ghxd.pid"),
 		AutoStart:       true,

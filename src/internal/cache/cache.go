@@ -10,15 +10,17 @@ import (
 
 // Entry is a cached response.
 type Entry struct {
-	Key      string
-	Stdout   []byte
-	Stderr   []byte
-	ExitCode int
-	CachedAt time.Time
-	TTL      time.Duration
-	Resource allowlist.ResourceType
-	Host     string
-	Repo     string
+	Key        string
+	Stdout     []byte
+	Stderr     []byte
+	ExitCode   int
+	CachedAt   time.Time
+	TTL        time.Duration
+	Resource   allowlist.ResourceType
+	Host       string
+	Repo       string
+	ResourceID string
+	ETag       string
 }
 
 // IsExpired returns true if the entry has outlived its TTL.
@@ -26,26 +28,54 @@ func (e *Entry) IsExpired() bool {
 	return time.Since(e.CachedAt) > e.TTL
 }
 
-// Cache is a thread-safe LRU cache with TTL support and namespace invalidation.
-type Cache struct {
-	mu      sync.RWMutex
-	maxSize int
-	items   map[string]*list.Element
-	order   *list.List // front = most recently used
-	onEvict func(key string)
+// DefaultMaxBytes bounds retained stdout and stderr payloads to 64 MiB.
+const DefaultMaxBytes int64 = 64 << 20
+
+// Usage reports the retained response-byte budget and rejected insertions.
+type Usage struct {
+	Bytes    int64 `json:"cache_bytes"`
+	MaxBytes int64 `json:"max_cache_bytes"`
+	Rejected int64 `json:"cache_rejected"`
 }
 
-// New creates a cache with the given max number of entries.
+type storedEntry struct {
+	entry *Entry
+	bytes int64
+}
+
+// Cache is a thread-safe LRU cache with TTL support and namespace invalidation.
+type Cache struct {
+	mu         sync.RWMutex
+	maxSize    int
+	maxBytes   int64
+	bytes      int64
+	rejected   int64
+	items      map[string]*list.Element
+	order      *list.List // front = most recently used
+	onEvict    func(key string)
+	generation uint64
+}
+
+// New creates a cache with an entry limit and the default response-byte limit.
 func New(maxSize int) *Cache {
+	return NewWithByteLimit(maxSize, DefaultMaxBytes)
+}
+
+// NewWithByteLimit creates a cache bounded by entries and stdout/stderr bytes.
+// A nonpositive limit disables storage. Entries must not be mutated after Set.
+func NewWithByteLimit(maxSize int, maxBytes int64) *Cache {
 	return &Cache{
-		maxSize: maxSize,
-		items:   make(map[string]*list.Element),
-		order:   list.New(),
+		maxSize:  maxSize,
+		maxBytes: maxBytes,
+		items:    make(map[string]*list.Element),
+		order:    list.New(),
 	}
 }
 
 // OnEvict sets a callback that fires when an entry is evicted.
 func (c *Cache) OnEvict(fn func(key string)) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	c.onEvict = fn
 }
 
@@ -59,7 +89,7 @@ func (c *Cache) Get(key string) *Entry {
 		return nil
 	}
 
-	entry := elem.Value.(*Entry)
+	entry := elem.Value.(*storedEntry).entry
 	if entry.IsExpired() {
 		c.removeElement(elem)
 		return nil
@@ -74,32 +104,78 @@ func (c *Cache) Get(key string) *Entry {
 func (c *Cache) Set(entry *Entry) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	c.set(entry)
+}
 
-	// Update existing entry
-	if elem, ok := c.items[entry.Key]; ok {
+// Peek returns retained bytes, including expired entries, for local immutable
+// projection and conditional validation. Entries must not be mutated.
+func (c *Cache) Peek(key string) *Entry {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if elem := c.items[key]; elem != nil {
 		c.order.MoveToFront(elem)
-		elem.Value = entry
+		return elem.Value.(*storedEntry).entry
+	}
+	return nil
+}
+
+// Version changes whenever a write invalidates entries, including an empty cache.
+func (c *Cache) Version() uint64 {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.generation
+}
+
+func (c *Cache) SetVersion(entry *Entry, version uint64) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.generation == version {
+		c.set(entry)
+	}
+}
+
+func (c *Cache) set(entry *Entry) {
+
+	// Drop a previous value even if its replacement cannot be retained.
+	if elem, ok := c.items[entry.Key]; ok {
+		c.bytes -= elem.Value.(*storedEntry).bytes
+		delete(c.items, entry.Key)
+		c.order.Remove(elem)
+	}
+
+	bytes := int64(len(entry.Stdout)) + int64(len(entry.Stderr))
+	if c.maxSize <= 0 || c.maxBytes <= 0 || bytes > c.maxBytes {
+		c.rejected++
 		return
 	}
 
-	// Evict LRU if at capacity
-	for c.order.Len() >= c.maxSize {
+	// Subtraction avoids overflow when checking available space.
+	for c.order.Len() >= c.maxSize || c.bytes > c.maxBytes-bytes {
 		c.evictOldest()
 	}
 
-	elem := c.order.PushFront(entry)
+	elem := c.order.PushFront(&storedEntry{entry: entry, bytes: bytes})
 	c.items[entry.Key] = elem
+	c.bytes += bytes
 }
 
 // InvalidateNamespace removes all entries matching the given host, repo, and resource type.
 func (c *Cache) InvalidateNamespace(host, repo string, resource allowlist.ResourceType) int {
+	return c.Invalidate(func(entry *Entry) bool {
+		return entry.Host == host && entry.Repo == repo && entry.Resource == resource
+	})
+}
+
+// Invalidate removes matching dependencies and fences in-flight cache fills.
+func (c *Cache) Invalidate(matches func(*Entry) bool) int {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	c.generation++
 
 	var toRemove []*list.Element
 	for elem := c.order.Front(); elem != nil; elem = elem.Next() {
-		entry := elem.Value.(*Entry)
-		if entry.Host == host && entry.Repo == repo && entry.Resource == resource {
+		entry := elem.Value.(*storedEntry).entry
+		if matches(entry) {
 			toRemove = append(toRemove, elem)
 		}
 	}
@@ -114,10 +190,12 @@ func (c *Cache) InvalidateNamespace(host, repo string, resource allowlist.Resour
 func (c *Cache) Flush() int {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	c.generation++
 
 	count := c.order.Len()
 	c.items = make(map[string]*list.Element)
 	c.order.Init()
+	c.bytes = 0
 	return count
 }
 
@@ -128,6 +206,13 @@ func (c *Cache) Size() int {
 	return c.order.Len()
 }
 
+// Usage returns a consistent snapshot of byte accounting and rejected inserts.
+func (c *Cache) Usage() Usage {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return Usage{Bytes: c.bytes, MaxBytes: c.maxBytes, Rejected: c.rejected}
+}
+
 // Keys returns all current cache keys (for debugging).
 func (c *Cache) Keys() []string {
 	c.mu.RLock()
@@ -135,7 +220,7 @@ func (c *Cache) Keys() []string {
 
 	keys := make([]string, 0, c.order.Len())
 	for elem := c.order.Front(); elem != nil; elem = elem.Next() {
-		keys = append(keys, elem.Value.(*Entry).Key)
+		keys = append(keys, elem.Value.(*storedEntry).entry.Key)
 	}
 	return keys
 }
@@ -148,9 +233,10 @@ func (c *Cache) evictOldest() {
 }
 
 func (c *Cache) removeElement(elem *list.Element) {
-	entry := elem.Value.(*Entry)
+	entry := elem.Value.(*storedEntry).entry
 	delete(c.items, entry.Key)
 	c.order.Remove(elem)
+	c.bytes -= elem.Value.(*storedEntry).bytes
 	if c.onEvict != nil {
 		c.onEvict(entry.Key)
 	}
