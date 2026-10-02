@@ -546,3 +546,21 @@ make clean
 ## License
 
 [MIT](LICENSE)
+
+### Linux user service
+
+Install `ghx` and `ghxd` in `~/.local/bin`, then copy
+[`contrib/systemd/ghxd.service`](../contrib/systemd/ghxd.service) to
+`~/.config/systemd/user/ghxd.service`. In `~/.ghx/config.yaml`, set
+`auto_start: false`, `dashboard_port: 0` (unless needed), and `log_file: ""`
+to send diagnostics to the journal. Stop an existing daemon with
+`ghx xdaemon stop`, then run `systemctl --user daemon-reload` and
+`systemctl --user enable --now ghxd`. Inspect failures with
+`journalctl --user -u ghxd`; restart with `systemctl --user restart ghxd`.
+Use the service manager to stop/restart a service-managed daemon.
+
+Unix daemons hold a kernel lock for their socket's lifetime. A concurrent start
+fails with a diagnostic before changing the socket or PID file. The persistent
+`.sock.lock` file must remain in place; it does not indicate a live daemon on its
+own. Stale PID files never authorize signalling a process. Startup also refuses
+an already-listening socket, including daemons from older releases.
