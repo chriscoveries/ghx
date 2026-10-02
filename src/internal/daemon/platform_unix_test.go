@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -17,6 +19,7 @@ import (
 	"time"
 
 	"github.com/brunoborges/ghx/src/internal/config"
+	"github.com/brunoborges/ghx/src/internal/dashboard"
 	"github.com/brunoborges/ghx/src/internal/protocol"
 )
 
@@ -219,4 +222,73 @@ func TestStartupFailureReleasesSocketAndLock(t *testing.T) {
 		t.Fatalf("failed startup retained lock: %v", err)
 	}
 	lock.Close()
+}
+
+func TestOwnershipRetainedUntilHTTPDrain(t *testing.T) {
+	started, release := make(chan struct{}), make(chan struct{})
+	var releaseOnce sync.Once
+	unblock := func() { releaseOnce.Do(func() { close(release) }) }
+	dash := dashboard.Handler()
+	httpServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		close(started)
+		<-release
+		dash(w, r)
+	}))
+	defer func() { unblock(); httpServer.Close() }()
+	go func() {
+		resp, err := http.Get(httpServer.URL)
+		if err == nil {
+			io.Copy(io.Discard, resp.Body)
+			resp.Body.Close()
+		}
+	}()
+	select {
+	case <-started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("HTTP request did not start")
+	}
+	cfg := config.DefaultConfig()
+	dir := t.TempDir()
+	cfg.SocketPath = filepath.Join(dir, "ghxd.sock")
+	cfg.PIDFile = filepath.Join(dir, "ghxd.pid")
+	cfg.DashboardPort = 0
+	s := NewServer(cfg, "test", os.Args[0])
+	s.httpSrv = httpServer.Config
+	finished := make(chan error, 1)
+	go func() { finished <- s.Run() }()
+	deadline := time.Now().Add(5 * time.Second)
+	ready := false
+	for time.Now().Before(deadline) {
+		conn, err := net.DialTimeout("unix", cfg.SocketPath, 50*time.Millisecond)
+		if err == nil {
+			conn.Close()
+			ready = true
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !ready {
+		t.Fatal("daemon did not become ready")
+	}
+	defer s.Shutdown()
+	go s.Shutdown()
+	<-s.done
+	select {
+	case err := <-finished:
+		t.Fatalf("Run returned before HTTP drained: %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+	if lock, err := acquireInstanceLock(cfg.SocketPath); err == nil {
+		lock.Close()
+		t.Fatal("daemon released ownership before HTTP drained")
+	}
+	unblock()
+	select {
+	case err := <-finished:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Run did not finish after HTTP drained")
+	}
 }

@@ -108,6 +108,9 @@ func (s *Server) Run() error {
 		s.startHTTP()
 	}
 
+	// Retain ownership until any concurrent HTTP shutdown has drained.
+	defer s.Shutdown()
+
 	// Handle signals
 	sigCh := make(chan os.Signal, 1)
 	notifyShutdownSignals(sigCh)
