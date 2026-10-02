@@ -10,11 +10,13 @@ permissions:
 
 jobs:
   release:
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(vars.GHX_LINUX_RUNNER || (github.repository == 'chriscoveries/ghx' && '["self-hosted", "linux", "ghx-ci"]' || '["ubuntu-latest"]')) }}
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - uses: actions/setup-go@v5
         with:
