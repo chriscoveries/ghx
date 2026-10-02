@@ -1,6 +1,8 @@
 package cache
 
 import (
+	"os"
+	"sync"
 	"testing"
 	"time"
 
@@ -87,5 +89,109 @@ func TestFlushAll(t *testing.T) {
 	}
 	if c.Size() != 0 {
 		t.Fatal("cache should be empty")
+	}
+}
+
+// The byte-budget tests retain real repository bytes rather than generated output.
+func budgetEntry(t *testing.T, key string, n int) *Entry {
+	t.Helper()
+	data, err := os.ReadFile("../../../LICENSE")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return &Entry{Key: key, Stdout: append([]byte(nil), data[:n]...), CachedAt: time.Now(), TTL: time.Minute}
+}
+
+func TestByteBudgetLRU(t *testing.T) {
+	c := NewWithByteLimit(10, 6)
+	c.Set(budgetEntry(t, "a", 3))
+	c.Set(budgetEntry(t, "b", 3))
+	c.Get("a") // Reading a makes b the eviction candidate.
+	c.Set(budgetEntry(t, "c", 3))
+	if c.Get("a") == nil || c.Get("b") != nil || c.Get("c") == nil {
+		t.Fatal("byte pressure must evict the least recently used entry")
+	}
+	if got := c.Usage(); got.Bytes != 6 || got.MaxBytes != 6 || got.Rejected != 0 {
+		t.Fatalf("usage = %+v", got)
+	}
+}
+
+func TestByteBudgetReplacement(t *testing.T) {
+	c := NewWithByteLimit(10, 6)
+	c.Set(budgetEntry(t, "a", 3))
+	c.Set(budgetEntry(t, "b", 3))
+	c.Set(budgetEntry(t, "a", 5))
+	if c.Get("b") != nil || c.Size() != 1 || c.Usage().Bytes != 5 {
+		t.Fatal("growing a replacement must evict other entries and release old bytes")
+	}
+	c.Set(budgetEntry(t, "a", 1))
+	if c.Usage().Bytes != 1 {
+		t.Fatal("shrinking a replacement must release old bytes")
+	}
+	c.Set(budgetEntry(t, "b", 3))
+	c.Set(budgetEntry(t, "a", 7))
+	if c.Get("a") != nil || c.Get("b") == nil || c.Usage().Bytes != 3 || c.Usage().Rejected != 1 {
+		t.Fatal("oversized replacement must drop the old value and preserve other entries")
+	}
+}
+
+func TestByteBudgetCountsStderrAndReleases(t *testing.T) {
+	c := NewWithByteLimit(2, 6)
+	a := budgetEntry(t, "a", 3)
+	a.Stderr = a.Stdout
+	c.Set(a)
+	if c.Usage().Bytes != 6 {
+		t.Fatal("stderr must count toward the response budget")
+	}
+	c.Set(budgetEntry(t, "b", 1))
+	if c.Usage().Bytes != 1 {
+		t.Fatal("eviction must release stdout and stderr bytes")
+	}
+	b := c.Get("b")
+	b.CachedAt = time.Now().Add(-2 * time.Minute)
+	if c.Get("b") != nil || c.Usage().Bytes != 0 {
+		t.Fatal("expiry must release bytes")
+	}
+	c.Set(a)
+	c.InvalidateNamespace("", "", a.Resource)
+	if c.Usage().Bytes != 0 {
+		t.Fatal("invalidation must release bytes")
+	}
+	c.Set(a)
+	c.Flush()
+	if c.Usage().Bytes != 0 {
+		t.Fatal("flush must release bytes")
+	}
+}
+
+func TestNonpositiveCapacityDisablesStorage(t *testing.T) {
+	for _, limits := range []struct {
+		entries int
+		bytes   int64
+	}{{0, 6}, {-1, 6}, {1, 0}, {1, -1}} {
+		c := NewWithByteLimit(limits.entries, limits.bytes)
+		c.Set(budgetEntry(t, "a", 1))
+		if c.Get("a") != nil || c.Size() != 0 || c.Usage().Bytes != 0 || c.Usage().Rejected != 1 {
+			t.Fatalf("nonpositive capacity %+v must disable storage", limits)
+		}
+	}
+}
+
+func TestByteBudgetConcurrent(t *testing.T) {
+	c := NewWithByteLimit(3, 6)
+	entry := budgetEntry(t, "same", 2)
+	var wg sync.WaitGroup
+	for range 8 {
+		wg.Go(func() {
+			for range 100 {
+				c.Set(entry)
+				c.Get(entry.Key)
+				c.Usage()
+			}
+		})
+	}
+	wg.Wait()
+	if c.Usage().Bytes != 2 || c.Size() != 1 {
+		t.Fatal("concurrent replacement must preserve accounting")
 	}
 }
