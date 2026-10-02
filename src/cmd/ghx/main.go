@@ -335,6 +335,7 @@ func printFormattedStats(data []byte) {
 		Misses        int64                      `json:"misses"`
 		Passthrough   int64                      `json:"passthrough"`
 		Coalesced     int64                      `json:"coalesced"`
+		Revalidated   int64                      `json:"revalidated"`
 		HitRate       float64                    `json:"hit_rate"`
 		CacheSize     int                        `json:"cache_size"`
 		CacheBytes    int64                      `json:"cache_bytes"`
@@ -354,6 +355,7 @@ func printFormattedStats(data []byte) {
 	fmt.Printf("Cache Misses:    %d\n", stats.Misses)
 	fmt.Printf("Passthrough:     %d\n", stats.Passthrough)
 	fmt.Printf("Coalesced:       %d\n", stats.Coalesced)
+	fmt.Printf("Revalidated:     %d (304 responses)\n", stats.Revalidated)
 	fmt.Printf("Cache Size:      %d / %d entries\n", stats.CacheSize, stats.MaxCacheSize)
 	fmt.Printf("Cache Bytes:     %d / %d bytes\n", stats.CacheBytes, stats.MaxCacheBytes)
 	fmt.Printf("Cache Rejected:  %d\n", stats.CacheRejected)

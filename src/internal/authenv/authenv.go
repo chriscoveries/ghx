@@ -10,6 +10,9 @@ import (
 type Environment map[string]string
 
 var names = []string{
+	"HTTP_PROXY",
+	"HTTPS_PROXY",
+	"NO_PROXY",
 	"GH_TOKEN",
 	"GITHUB_TOKEN",
 	"GH_ENTERPRISE_TOKEN",

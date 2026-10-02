@@ -148,7 +148,7 @@ func TestHandler_CacheKeysIsolateAuthIdentity(t *testing.T) {
 	request := func(token, tokenHash string) *protocol.Response {
 		return h.Handle(&protocol.Request{
 			Type:    protocol.TypeExec,
-			Args:    []string{"api", "user"},
+			Args:    []string{"api", "user", "--jq", ".login"},
 			AuthEnv: authenv.Environment{"GH_TOKEN": token},
 			Context: execctx.ExecContext{Host: "github.com", TokenHash: tokenHash},
 		})
@@ -188,13 +188,13 @@ func TestHandler_SingleflightIsolatesAuthIdentity(t *testing.T) {
 	requests := []*protocol.Request{
 		{
 			Type:    protocol.TypeExec,
-			Args:    []string{"api", "user"},
+			Args:    []string{"api", "user", "--jq", ".login"},
 			AuthEnv: authenv.Environment{"GH_TOKEN": "account-one"},
 			Context: execctx.ExecContext{Host: "github.com", TokenHash: "hash-one"},
 		},
 		{
 			Type:    protocol.TypeExec,
-			Args:    []string{"api", "user"},
+			Args:    []string{"api", "user", "--jq", ".login"},
 			AuthEnv: authenv.Environment{"GH_TOKEN": "account-two"},
 			Context: execctx.ExecContext{Host: "github.com", TokenHash: "hash-two"},
 		},
