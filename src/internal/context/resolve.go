@@ -5,11 +5,13 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 )
 
 // ExecContext holds resolved execution context for building cache keys.
 type ExecContext struct {
+	Epoch     string `json:"epoch,omitempty"`
 	Host      string `json:"host"`
 	Repo      string `json:"repo"`
 	Branch    string `json:"branch"`
@@ -19,6 +21,11 @@ type ExecContext struct {
 // Resolve gathers execution context from the current working directory and environment.
 func Resolve(ghPath string) ExecContext {
 	ctx := ExecContext{}
+	if dir := os.Getenv("GHX_GATE_DIR"); dir != "" {
+		if b, err := os.ReadFile(filepath.Join(dir, "epoch")); err == nil {
+			ctx.Epoch = string(b)
+		}
+	}
 
 	// Host: GH_HOST env var or default
 	if host := os.Getenv("GH_HOST"); host != "" {
@@ -101,6 +108,7 @@ func tokenHash(token string) string {
 // CacheKey builds a deterministic cache key from the execution context and command args.
 func CacheKey(ctx ExecContext, args []string) string {
 	h := sha256.New()
+	fmt.Fprintf(h, "epoch=%s\n", ctx.Epoch)
 	fmt.Fprintf(h, "host=%s\n", ctx.Host)
 	fmt.Fprintf(h, "repo=%s\n", ctx.Repo)
 	fmt.Fprintf(h, "branch=%s\n", ctx.Branch)

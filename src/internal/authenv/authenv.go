@@ -10,6 +10,9 @@ import (
 type Environment map[string]string
 
 var names = []string{
+	"SSL_CERT_FILE",
+	"GH_CALLER",
+	"GH_REPO",
 	"HTTP_PROXY",
 	"HTTPS_PROXY",
 	"NO_PROXY",
