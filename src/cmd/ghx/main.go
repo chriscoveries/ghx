@@ -30,6 +30,10 @@ func main() {
 	}
 
 	args := os.Args[1:]
+	if err := prepareFleet(args); err != nil {
+		fmt.Fprintln(os.Stderr, "ghx:", err)
+		os.Exit(1)
+	}
 	if len(args) == 0 {
 		mustResolveGH(cfg)
 		execDirect(cfg.GHPath, nil)
@@ -57,7 +61,7 @@ func main() {
 	// interactive or otherwise unsuitable for the daemon. Execute gh directly so the
 	// user gets a full TTY and no IPC timeout can occur.
 	classifier := allowlist.NewClassifier(cfg.AdditionalCache)
-	if classifier.Classify(ghArgs).Type == allowlist.Passthrough {
+	if (len(ghArgs) > 1 && ghArgs[0] == "api" && strings.TrimPrefix(ghArgs[1], "/") == "rate_limit") || classifier.Classify(ghArgs).Type == allowlist.Passthrough {
 		execDirect(cfg.GHPath, ghArgs)
 		return
 	}
@@ -106,6 +110,7 @@ func main() {
 		return
 	}
 
+	logCall(ghArgs, resp.Cached, resp.ExitCode)
 	if len(resp.Stdout) > 0 {
 		os.Stdout.Write(resp.Stdout)
 	}

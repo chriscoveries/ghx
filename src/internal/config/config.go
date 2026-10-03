@@ -9,6 +9,7 @@ import (
 )
 
 type Config struct {
+	CacheFile       string                   `yaml:"cache_file"`
 	ResourceViews   bool                     `yaml:"resource_views"`
 	ImmutableTTL    time.Duration            `yaml:"immutable_ttl"`
 	TTL             time.Duration            `yaml:"ttl"`
