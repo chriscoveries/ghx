@@ -61,7 +61,7 @@ func main() {
 	// interactive or otherwise unsuitable for the daemon. Execute gh directly so the
 	// user gets a full TTY and no IPC timeout can occur.
 	classifier := allowlist.NewClassifier(cfg.AdditionalCache)
-	if classifier.Classify(ghArgs).Type == allowlist.Passthrough {
+	if (len(ghArgs) > 1 && ghArgs[0] == "api" && strings.TrimPrefix(ghArgs[1], "/") == "rate_limit") || classifier.Classify(ghArgs).Type == allowlist.Passthrough {
 		execDirect(cfg.GHPath, ghArgs)
 		return
 	}
