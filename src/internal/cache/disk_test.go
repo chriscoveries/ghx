@@ -30,7 +30,7 @@ func TestDiskRestartAndInvalidation(t *testing.T) {
 		t.Fatal("flush resurrected snapshot", err)
 	}
 	info, err := os.Stat(path)
-	if err != nil || info.Mode().Perm() != 0600 {
+	if err != nil || info.Mode().Perm() != wantSnapshotMode {
 		t.Fatal("private snapshot required")
 	}
 }
