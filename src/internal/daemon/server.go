@@ -78,6 +78,12 @@ func (s *Server) Run() error {
 		defer lock.Close()
 	}
 
+	if s.cfg.CacheFile != "" {
+		if err := s.cache.EnableDisk(s.cfg.CacheFile); err != nil {
+			return fmt.Errorf("disk cache: %w", err)
+		}
+	}
+
 	// Remove stale socket (no-op on Windows)
 	if err := removeStaleSocket(s.cfg.SocketPath); err != nil {
 		return fmt.Errorf("socket cleanup: %w", err)

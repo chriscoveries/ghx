@@ -13,6 +13,10 @@ import (
 var version = "dev"
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "--gate" {
+		runGate(os.Args[2:])
+		return
+	}
 	cfg, err := config.Load()
 	if err != nil {
 		log.Printf("warning: config load: %v (using defaults)", err)
