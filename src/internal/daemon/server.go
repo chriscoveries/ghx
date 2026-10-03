@@ -42,7 +42,7 @@ type Server struct {
 
 // NewServer creates a new daemon server.
 func NewServer(cfg *config.Config, version string, resolvedGHPath string) *Server {
-	c := cache.New(cfg.MaxCacheEntries)
+	c := cache.NewWithByteLimit(cfg.MaxCacheEntries, cfg.MaxCacheBytes)
 	stats := metrics.New()
 	classifier := allowlist.NewClassifier(cfg.AdditionalCache)
 	handler := NewHandler(cfg, c, classifier, stats)
@@ -188,10 +188,10 @@ func (s *Server) startHTTP() {
 
 	// JSON API
 	mux.HandleFunc("/api/stats", func(w http.ResponseWriter, r *http.Request) {
-		snap := s.stats.Snapshot(s.cache.Size(), s.cfg.MaxCacheEntries)
+		snap := s.handler.snapshot()
 		resp := struct {
 			Version string `json:"version"`
-			metrics.Snapshot
+			cacheSnapshot
 		}{s.version, snap}
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Access-Control-Allow-Origin", "*")
