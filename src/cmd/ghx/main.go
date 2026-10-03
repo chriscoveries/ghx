@@ -30,6 +30,10 @@ func main() {
 	}
 
 	args := os.Args[1:]
+	if err := prepareFleet(args); err != nil {
+		fmt.Fprintln(os.Stderr, "ghx:", err)
+		os.Exit(1)
+	}
 	if len(args) == 0 {
 		mustResolveGH(cfg)
 		execDirect(cfg.GHPath, nil)
@@ -106,6 +110,7 @@ func main() {
 		return
 	}
 
+	logCall(ghArgs, resp.Cached, resp.ExitCode)
 	if len(resp.Stdout) > 0 {
 		os.Stdout.Write(resp.Stdout)
 	}

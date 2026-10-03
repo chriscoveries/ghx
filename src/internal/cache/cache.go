@@ -33,9 +33,10 @@ const DefaultMaxBytes int64 = 64 << 20
 
 // Usage reports the retained response-byte budget and rejected insertions.
 type Usage struct {
-	Bytes    int64 `json:"cache_bytes"`
-	MaxBytes int64 `json:"max_cache_bytes"`
-	Rejected int64 `json:"cache_rejected"`
+	Bytes      int64 `json:"cache_bytes"`
+	MaxBytes   int64 `json:"max_cache_bytes"`
+	Rejected   int64 `json:"cache_rejected"`
+	DiskErrors int64 `json:"disk_errors"`
 }
 
 type storedEntry struct {
@@ -54,6 +55,8 @@ type Cache struct {
 	order      *list.List // front = most recently used
 	onEvict    func(key string)
 	generation uint64
+	diskPath   string
+	diskErrors int64
 }
 
 // New creates a cache with an entry limit and the default response-byte limit.
@@ -135,6 +138,7 @@ func (c *Cache) SetVersion(entry *Entry, version uint64) {
 }
 
 func (c *Cache) set(entry *Entry) {
+	defer c.persistLocked()
 
 	// Drop a previous value even if its replacement cannot be retained.
 	if elem, ok := c.items[entry.Key]; ok {
@@ -171,6 +175,7 @@ func (c *Cache) Invalidate(matches func(*Entry) bool) int {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.generation++
+	defer c.persistLocked()
 
 	var toRemove []*list.Element
 	for elem := c.order.Front(); elem != nil; elem = elem.Next() {
@@ -191,6 +196,7 @@ func (c *Cache) Flush() int {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.generation++
+	defer c.persistLocked()
 
 	count := c.order.Len()
 	c.items = make(map[string]*list.Element)
@@ -210,7 +216,7 @@ func (c *Cache) Size() int {
 func (c *Cache) Usage() Usage {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	return Usage{Bytes: c.bytes, MaxBytes: c.maxBytes, Rejected: c.rejected}
+	return Usage{Bytes: c.bytes, MaxBytes: c.maxBytes, Rejected: c.rejected, DiskErrors: c.diskErrors}
 }
 
 // Keys returns all current cache keys (for debugging).

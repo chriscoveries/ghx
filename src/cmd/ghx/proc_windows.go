@@ -30,6 +30,10 @@ func startDaemon(cfg *config.Config) error {
 // execDirect runs gh directly (bypass daemon entirely).
 // Windows has no exec-replace, so we run the command and exit.
 func execDirect(ghPath string, args []string) {
+	if os.Getenv("GHX_CALL_LOG") != "" {
+		runLoggedDirect(ghPath, args)
+		return
+	}
 	path, err := exec.LookPath(ghPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "ghx: gh not found: %v\n", err)
