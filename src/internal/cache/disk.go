@@ -26,7 +26,7 @@ func (c *Cache) EnableDisk(path string) error {
 		defer f.Close()
 		info, e := f.Stat()
 		limit := c.maxBytes*2 + int64(c.maxSize)*8192 + 1024
-		if e != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0077 != 0 || info.Size() > limit {
+		if e != nil || !info.Mode().IsRegular() || !privateModeOK(info.Mode()) || info.Size() > limit {
 			return fmt.Errorf("unsafe or oversized disk cache")
 		}
 		if err = json.NewDecoder(io.LimitReader(f, limit+1)).Decode(&entries); err != nil {
