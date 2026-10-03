@@ -10,15 +10,17 @@ import (
 
 // Entry is a cached response.
 type Entry struct {
-	Key      string
-	Stdout   []byte
-	Stderr   []byte
-	ExitCode int
-	CachedAt time.Time
-	TTL      time.Duration
-	Resource allowlist.ResourceType
-	Host     string
-	Repo     string
+	Key        string
+	Stdout     []byte
+	Stderr     []byte
+	ExitCode   int
+	CachedAt   time.Time
+	TTL        time.Duration
+	Resource   allowlist.ResourceType
+	Host       string
+	Repo       string
+	ResourceID string
+	ETag       string
 }
 
 // IsExpired returns true if the entry has outlived its TTL.
@@ -43,14 +45,15 @@ type storedEntry struct {
 
 // Cache is a thread-safe LRU cache with TTL support and namespace invalidation.
 type Cache struct {
-	mu       sync.RWMutex
-	maxSize  int
-	maxBytes int64
-	bytes    int64
-	rejected int64
-	items    map[string]*list.Element
-	order    *list.List // front = most recently used
-	onEvict  func(key string)
+	mu         sync.RWMutex
+	maxSize    int
+	maxBytes   int64
+	bytes      int64
+	rejected   int64
+	items      map[string]*list.Element
+	order      *list.List // front = most recently used
+	onEvict    func(key string)
+	generation uint64
 }
 
 // New creates a cache with an entry limit and the default response-byte limit.
@@ -101,6 +104,37 @@ func (c *Cache) Get(key string) *Entry {
 func (c *Cache) Set(entry *Entry) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	c.set(entry)
+}
+
+// Peek returns retained bytes, including expired entries, for local immutable
+// projection and conditional validation. Entries must not be mutated.
+func (c *Cache) Peek(key string) *Entry {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if elem := c.items[key]; elem != nil {
+		c.order.MoveToFront(elem)
+		return elem.Value.(*storedEntry).entry
+	}
+	return nil
+}
+
+// Version changes whenever a write invalidates entries, including an empty cache.
+func (c *Cache) Version() uint64 {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.generation
+}
+
+func (c *Cache) SetVersion(entry *Entry, version uint64) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.generation == version {
+		c.set(entry)
+	}
+}
+
+func (c *Cache) set(entry *Entry) {
 
 	// Drop a previous value even if its replacement cannot be retained.
 	if elem, ok := c.items[entry.Key]; ok {
@@ -127,13 +161,21 @@ func (c *Cache) Set(entry *Entry) {
 
 // InvalidateNamespace removes all entries matching the given host, repo, and resource type.
 func (c *Cache) InvalidateNamespace(host, repo string, resource allowlist.ResourceType) int {
+	return c.Invalidate(func(entry *Entry) bool {
+		return entry.Host == host && entry.Repo == repo && entry.Resource == resource
+	})
+}
+
+// Invalidate removes matching dependencies and fences in-flight cache fills.
+func (c *Cache) Invalidate(matches func(*Entry) bool) int {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	c.generation++
 
 	var toRemove []*list.Element
 	for elem := c.order.Front(); elem != nil; elem = elem.Next() {
 		entry := elem.Value.(*storedEntry).entry
-		if entry.Host == host && entry.Repo == repo && entry.Resource == resource {
+		if matches(entry) {
 			toRemove = append(toRemove, elem)
 		}
 	}
@@ -148,6 +190,7 @@ func (c *Cache) InvalidateNamespace(host, repo string, resource allowlist.Resour
 func (c *Cache) Flush() int {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	c.generation++
 
 	count := c.order.Len()
 	c.items = make(map[string]*list.Element)
