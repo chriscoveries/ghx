@@ -57,6 +57,14 @@ func main() {
 	// Resolve real gh binary (lazy — only on execution path)
 	mustResolveGH(cfg)
 
+	// The daemon protocol does not carry stdin. Keep input in the caller process,
+	// including implicit stdin consumers and extensions, before resolving context
+	// or contacting the daemon. These calls must never be cached or coalesced.
+	if readsStdin(ghArgs, os.Stdin) {
+		execDirect(cfg.GHPath, ghArgs)
+		return
+	}
+
 	// Short-circuit: passthrough commands (e.g. auth login, config, codespace) are
 	// interactive or otherwise unsuitable for the daemon. Execute gh directly so the
 	// user gets a full TTY and no IPC timeout can occur.
@@ -118,6 +126,19 @@ func main() {
 		os.Stderr.Write(resp.Stderr)
 	}
 	os.Exit(resp.ExitCode)
+}
+
+func readsStdin(args []string, stdin *os.File) bool {
+	for _, arg := range args {
+		// gh uses '-' for input/body files and '@-' for typed API fields.
+		if arg == "-" || arg == "@-" || strings.HasSuffix(arg, "=-") || strings.HasSuffix(arg, "=@-") {
+			return true
+		}
+	}
+	// Do not read or probe for available bytes: a pipe may still be waiting for
+	// its producer. Forward pipes, sockets and redirected files intact.
+	info, err := stdin.Stat()
+	return err == nil && info.Mode()&os.ModeCharDevice == 0
 }
 
 // handleSubcommand handles ghx-specific subcommands. Returns true if handled.
