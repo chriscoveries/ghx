@@ -1,0 +1,23 @@
+version: 2.1
+
+jobs:
+  go-test:
+    machine: true
+    resource_class: chriscoveries/claw
+    environment:
+      GOFLAGS: -buildvcs=false
+
+    steps:
+      - run:
+          name: claw admission gate (3 jobs max, 3 GiB floor)
+          command: /usr/local/lib/claw-ci/gate.sh
+      - checkout
+      - run:
+          name: go vet+build+test
+          command: |
+            go vet ./... && go build ./... && go test -v -race ./...
+
+workflows:
+  ci:
+    jobs:
+      - go-test
