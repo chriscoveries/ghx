@@ -4,10 +4,12 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 
 	"github.com/brunoborges/ghx/src/internal/config"
+	"github.com/brunoborges/ghx/src/internal/governor"
 )
 
 // One batched GraphQL read per repository: the default branch head, the open
@@ -28,10 +30,14 @@ const snapshotQuery = `query($owner: String!, $name: String!, $limit: Int!) {
       target { oid ... on Commit { committedDate statusCheckRollup { state } } }
     }
     pullRequests(first: $limit, states: OPEN, orderBy: {field: UPDATED_AT, direction: DESC}) {
+      pageInfo { hasNextPage endCursor }
       nodes {
         number
         title
         isDraft
+        state
+        createdAt
+        updatedAt
         mergeable
         mergeStateStatus
         reviewDecision
@@ -39,10 +45,16 @@ const snapshotQuery = `query($owner: String!, $name: String!, $limit: Int!) {
         headRefOid
         baseRefName
         baseRefOid
-        updatedAt
         changedFiles
-        files(first: 100) { totalCount nodes { path additions deletions } }
-        reviews(first: 20) {
+        additions
+        deletions
+        files(first: 100) {
+          pageInfo { hasNextPage }
+          totalCount
+          nodes { path additions deletions }
+        }
+        reviews(last: 100) {
+          pageInfo { hasPreviousPage }
           totalCount
           nodes { state submittedAt author { login } commit { oid } }
         }
@@ -53,9 +65,16 @@ const snapshotQuery = `query($owner: String!, $name: String!, $limit: Int!) {
               statusCheckRollup {
                 state
                 contexts(first: 100) {
+                  pageInfo { hasNextPage }
                   nodes {
                     __typename
-                    ... on CheckRun { name status conclusion checkSuite { app { slug } } }
+                    ... on CheckRun {
+                      databaseId
+                      name
+                      status
+                      conclusion
+                      checkSuite { app { slug databaseId } workflowRun { event databaseId } }
+                    }
                     ... on StatusContext { context state targetUrl }
                   }
                 }
@@ -131,9 +150,36 @@ func snapshotGHArgs(opts snapshotOptions) []string {
 	}
 }
 
+// applySnapshotProxy re-encodes the gate caller for the child process with the
+// freshness this command actually means. It is the only place a snapshot can
+// ask the gate to bypass its window.
+func applySnapshotProxy(fresh bool) error {
+	addr := os.Getenv("GHX_GATE_ADDR")
+	if addr == "" {
+		return nil
+	}
+	dir := os.Getenv("GHX_GATE_DIR")
+	if dir == "" {
+		return fmt.Errorf("GHX_GATE_DIR missing; run devmsg box install-ghx")
+	}
+	lane := os.Getenv("GH_CALLER")
+	os.Setenv("HTTPS_PROXY", governor.ProxyURL(addr, governor.Caller{Lane: lane, Class: "automation", Revalidate: fresh}, dir))
+	os.Setenv("HTTP_PROXY", os.Getenv("HTTPS_PROXY"))
+	os.Setenv("NO_PROXY", "")
+	os.Setenv("SSL_CERT_FILE", filepath.Join(dir, "ca.pem"))
+	if fresh {
+		os.Setenv("GHX_NO_CACHE", "1")
+	} else {
+		os.Unsetenv("GHX_NO_CACHE")
+	}
+	return nil
+}
+
 func handleSnapshot(cfg *config.Config, args []string) {
 	if len(args) == 1 && (args[0] == "-h" || args[0] == "--help") {
 		fmt.Println("Usage: ghx snapshot -R owner/name [--limit N] [--fresh]")
+		fmt.Println("  --limit N   open PRs to return, 1..100 (default 20)")
+		fmt.Println("  --fresh     bypass the shared window; authority decisions only")
 		fmt.Println()
 		fmt.Println("One batched GraphQL read of a repo: default branch head, open PRs,")
 		fmt.Println("each head's checks. Shared through the gate window; --fresh is for")
@@ -145,8 +191,14 @@ func handleSnapshot(cfg *config.Config, args []string) {
 		fmt.Fprintln(os.Stderr, "ghx snapshot:", err)
 		os.Exit(2)
 	}
-	if opts.fresh {
-		os.Setenv("GHX_NO_CACHE", "1")
+	// The proxy URL is built once, in prepareFleet, from the flags it parsed —
+	// and it does not know --fresh. Setting GHX_NO_CACHE here would be too late:
+	// the caller (and with it Revalidate) is already encoded in HTTPS_PROXY, so
+	// a "fresh" snapshot would quietly be served from the window it was meant to
+	// bypass. Rebuild the proxy environment for this child instead.
+	if err := applySnapshotProxy(opts.fresh); err != nil {
+		fmt.Fprintln(os.Stderr, "ghx snapshot:", err)
+		os.Exit(1)
 	}
 	cmd := exec.Command(cfg.GHPath, snapshotGHArgs(opts)...)
 	cmd.Stdin = os.Stdin
