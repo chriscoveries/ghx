@@ -19,7 +19,10 @@ No retry is performed inside a call. A denied call cannot be bypassed with a
 new caller name. Fresh cache hits consume no upstream budget. There is no box and no
 per-caller cap: the per-caller hour count is attribution and reporting only.
 The single read refusal is GitHub's own signal — a persisted 403/429 cooldown
-or the floor (Remaining under 500). Status reads (run lists, check runs and
+(and only that status pair: a rate-limit response is a 403 or a 429, never a
+plain 5xx) or the floor (Remaining under 500). hour_calls counts calls,
+including 304 revalidations, so a revalidation is visible even though it costs
+no quota. Status reads (run lists, check runs and
 suites, commit statuses, GraphQL queries) share one box-wide StatusTTL window
 (default 120s) instead of shrinking to GitHub's advertised 60s max-age, so
 every lane polling a repo inside that window is served by one upstream read.
@@ -33,3 +36,14 @@ No production limiter or daemon is changed by the tests.
 
 Contract reference:
 https://docs.github.com/en/rest/using-the-rest-api/best-practices-for-using-the-rest-api
+
+## One batched read per repository
+
+`ghx snapshot -R owner/name [--limit N] [--fresh]` issues a single GraphQL query
+for a repository: default branch head, its check rollup, and the open pull
+requests with head SHA, mergeability, review decision and each head's checks.
+Everything a lane needs to decide "is this mergeable and green" arrives in one
+call, and every lane reading the same repo inside the status window is served
+from the gate's single upstream read. `--fresh` is the agreed authority
+exception (the final approval immediately before a landing) and is the only
+caller that should ask for a fresh copy.

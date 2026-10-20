@@ -447,7 +447,9 @@ func (g *Gate) RoundTrip(r *http.Request, c Caller) (result *http.Response) {
 			return failure(503, "cache save failed")
 		}
 		g.State.Counts["304"]++
-		g.State.Calls[caller] = g.State.Calls[caller][:len(g.State.Calls[caller])-1]
+		// A revalidation is a call: it leaves the box and spends a GitHub
+		// request even though 304 costs no quota. Keeping the stamp is what
+		// makes hour_calls a call count rather than a quota count.
 		resp = &http.Response{StatusCode: 200, Header: e.Header.Clone(), Body: io.NopCloser(bytes.NewReader(e.Body)), ContentLength: int64(len(e.Body))}
 	}
 	// D1: the block gates FUTURE requests; the fresh response just received is

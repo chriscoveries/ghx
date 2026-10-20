@@ -76,7 +76,9 @@ func TestETag304AndWrites(t *testing.T) {
 			t.Fatal("304 failed to restore captured body")
 		}
 	}
-	if g.State.Counts["304"] != 1 || len(g.State.Calls["codex-A"]) != 1 {
+	// Two calls left the box (one 200 and one 304 revalidation), so the
+	// caller has two stamps: hour_calls counts calls, not quota.
+	if g.State.Counts["304"] != 1 || len(g.State.Calls["codex-A"]) != 2 {
 		t.Fatal(g.State)
 	}
 	for i := 0; i < 2; i++ {
