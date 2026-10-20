@@ -158,7 +158,7 @@ func (g *Gate) HourCalls() map[string]int64 {
 	out := map[string]int64{}
 	after := g.Now().Unix() - 3600
 	for key, calls := range g.State.Calls {
-		if strings.HasPrefix(key, "read:") {
+		if strings.HasPrefix(key, "read:") || key == "box" {
 			continue
 		}
 		var count int64

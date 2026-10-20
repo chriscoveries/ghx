@@ -21,6 +21,11 @@ func prepareFleet(args []string) error {
 	if caller == "" {
 		caller = os.Getenv("DEVMSG_LANE")
 	}
+	// CCCC actors do not export CODEX_LANE/DEVMSG_LANE; without this the whole
+	// fleet collapses into one hostname caller and per-actor reporting is lost.
+	if caller == "" {
+		caller = os.Getenv("CCCC_ACTOR_ID")
+	}
 	if caller == "" {
 		host, _ := os.Hostname()
 		caller = host + ":" + os.Getenv("USER")
