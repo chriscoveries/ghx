@@ -272,6 +272,13 @@ func (g *Gate) RoundTrip(r *http.Request, c Caller) (result *http.Response) {
 		}
 	}
 	stale := func(reason string) *http.Response {
+		// An explicit revalidation is a promise that the answer is current. A
+		// stale body carries its marker in a response header a CLI does not
+		// print (gh snapshot prints JSON only), so serving stale here would hand
+		// an authority caller an old approval it cannot detect. Fail instead.
+		if c.Revalidate {
+			return nil
+		}
 		if e.At > 0 && now-e.At <= 3600 {
 			g.State.Counts["stale"]++
 			h := e.Header.Clone()

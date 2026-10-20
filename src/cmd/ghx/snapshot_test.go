@@ -17,7 +17,7 @@ func TestSnapshotArgsNameOneRepoAndOneQuery(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if opts.owner != "chriscoveries" || opts.name != "ghx" || opts.limit != 20 || opts.fresh {
+	if opts.owner != "chriscoveries" || opts.name != "ghx" || opts.limit != 100 || opts.fresh {
 		t.Fatalf("opts %+v", opts)
 	}
 	args := snapshotGHArgs(opts)

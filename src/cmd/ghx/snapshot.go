@@ -96,7 +96,7 @@ type snapshotOptions struct {
 // parseSnapshotArgs is pure so the flag contract can be tested without a gh
 // binary, a gate or a network.
 func parseSnapshotArgs(args []string) (snapshotOptions, error) {
-	opts := snapshotOptions{limit: 20}
+	opts := snapshotOptions{limit: 100}
 	repo := ""
 	for i := 0; i < len(args); i++ {
 		switch a := args[i]; {
@@ -178,7 +178,7 @@ func applySnapshotProxy(fresh bool) error {
 func handleSnapshot(cfg *config.Config, args []string) {
 	if len(args) == 1 && (args[0] == "-h" || args[0] == "--help") {
 		fmt.Println("Usage: ghx snapshot -R owner/name [--limit N] [--fresh]")
-		fmt.Println("  --limit N   open PRs to return, 1..100 (default 20)")
+		fmt.Println("  --limit N   open PRs to return, 1..100 (default 100)")
 		fmt.Println("  --fresh     bypass the shared window; authority decisions only")
 		fmt.Println()
 		fmt.Println("One batched GraphQL read of a repo: default branch head, open PRs,")

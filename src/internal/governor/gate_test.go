@@ -426,3 +426,67 @@ func TestWriteInvalidatesOnlyItsRepo(t *testing.T) {
 		t.Fatal("unscoped write left the cache intact")
 	}
 }
+
+// A caller that asked for a fresh read must not be handed a stale body on the
+// outage path: the staleness marker travels in a header that a JSON-only CLI
+// never prints, so the authority decision would silently use an old approval.
+func TestRevalidateIsNeverAnsweredFromStale(t *testing.T) {
+	g := setup(t)
+	g.Transport = transport(func(r *http.Request) (*http.Response, error) {
+		return response(200, fixture(t), http.Header{"Etag": []string{`"s"`}}), nil
+	})
+	content(t, g.RoundTrip(req("GET", "/repos/o/r/pulls/1"), caller))
+	at := g.Now()
+	g.Now = func() time.Time { return at.Add(400 * time.Second) }
+	g.Transport = transport(func(r *http.Request) (*http.Response, error) { return nil, io.ErrUnexpectedEOF })
+
+	// Shared read: stale is the whole point and stays available.
+	shared := g.RoundTrip(req("GET", "/repos/o/r/pulls/1"), caller)
+	if shared.Header.Get("X-Ghgate-Stale") != "true" {
+		t.Fatal("shared read lost its stale fallback")
+	}
+	content(t, shared)
+	// Explicit revalidation: fail rather than answer with an old body.
+	fresh := req("GET", "/repos/o/r/pulls/1")
+	freshCaller := caller
+	freshCaller.Revalidate = true
+	r := g.RoundTrip(fresh, freshCaller)
+	if r.StatusCode != 503 || r.Header.Get("X-Ghgate-Stale") != "" {
+		t.Fatalf("revalidation served stale: %d %q", r.StatusCode, r.Header.Get("X-Ghgate-Stale"))
+	}
+	content(t, r)
+}
+
+// Same rule on the cooldown path: a 403 that would otherwise be softened into
+// a cached 200 for ordinary readers must stay a refusal for a revalidator.
+func TestRevalidateIsNeverAnsweredFromStaleDuringCooldown(t *testing.T) {
+	g := setup(t)
+	g.Transport = transport(func(r *http.Request) (*http.Response, error) {
+		return response(200, fixture(t), http.Header{"Etag": []string{`"c"`}}), nil
+	})
+	content(t, g.RoundTrip(req("GET", "/repos/o/r/pulls/2"), caller))
+	// GitHub answers a 403 with a reset far in the future: the gate records a
+	// block for this identity.
+	g.Transport = transport(func(r *http.Request) (*http.Response, error) {
+		return response(403, []byte(`{"message":"rate limit"}`), http.Header{
+			"X-Ratelimit-Remaining": []string{"0"},
+			"X-Ratelimit-Reset":     []string{strconv.FormatInt(g.Now().Unix()+3600, 10)},
+		}), nil
+	})
+	content(t, g.RoundTrip(req("GET", "/repos/o/r/pulls/3"), caller))
+
+	shared := g.RoundTrip(req("GET", "/repos/o/r/pulls/2"), caller)
+	if shared.StatusCode != 200 || shared.Header.Get("X-Ghgate-Stale") != "true" {
+		t.Fatalf("shared read should still serve stale under cooldown: %d", shared.StatusCode)
+	}
+	content(t, shared)
+
+	fresh := req("GET", "/repos/o/r/pulls/2")
+	freshCaller := caller
+	freshCaller.Revalidate = true
+	r := g.RoundTrip(fresh, freshCaller)
+	if r.StatusCode == 200 {
+		t.Fatal("revalidation served a cached 200 under cooldown")
+	}
+	content(t, r)
+}
