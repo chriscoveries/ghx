@@ -19,7 +19,7 @@ func TestSnapshotArgsNameOneRepoAndOneQuery(t *testing.T) {
 		t.Fatalf("not one graphql call: %s", joined)
 	}
 	// The batch: head, PRs with their head commit, and the check rollup.
-	for _, want := range []string{"defaultBranchRef", "pullRequests(", "headRefOid", "statusCheckRollup", "reviewDecision"} {
+	for _, want := range []string{"defaultBranchRef", "pullRequests(", "headRefOid", "baseRefOid", "changedFiles", "files(first: 100)", "reviews(first: 20)", "statusCheckRollup", "reviewDecision", "checkSuite { app { slug } }"} {
 		if !strings.Contains(snapshotQuery, want) {
 			t.Fatalf("query lacks %s", want)
 		}

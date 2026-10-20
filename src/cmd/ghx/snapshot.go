@@ -37,7 +37,15 @@ const snapshotQuery = `query($owner: String!, $name: String!, $limit: Int!) {
         reviewDecision
         headRefName
         headRefOid
+        baseRefName
+        baseRefOid
         updatedAt
+        changedFiles
+        files(first: 100) { totalCount nodes { path additions deletions } }
+        reviews(first: 20) {
+          totalCount
+          nodes { state submittedAt author { login } commit { oid } }
+        }
         commits(last: 1) {
           nodes {
             commit {
@@ -47,8 +55,8 @@ const snapshotQuery = `query($owner: String!, $name: String!, $limit: Int!) {
                 contexts(first: 100) {
                   nodes {
                     __typename
-                    ... on CheckRun { name status conclusion }
-                    ... on StatusContext { context state }
+                    ... on CheckRun { name status conclusion checkSuite { app { slug } } }
+                    ... on StatusContext { context state targetUrl }
                   }
                 }
               }
