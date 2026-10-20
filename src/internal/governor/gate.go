@@ -228,6 +228,7 @@ func (g *Gate) RoundTrip(r *http.Request, c Caller) (result *http.Response) {
 	// always revalidate and cannot use this path for authority decisions.
 	if reason == "" && cacheable && freshEntry(r, e, now) {
 		g.State.Counts["hit"]++
+		_ = os.Chtimes(path, g.Now(), g.Now())
 		h := e.Header.Clone()
 		h.Set("Age", strconv.FormatInt(now-e.At, 10))
 		h.Set("X-Ghgate-Cache", "hit")
@@ -316,21 +317,40 @@ func (g *Gate) RoundTrip(r *http.Request, c Caller) (result *http.Response) {
 		if reset, err := strconv.ParseInt(resp.Header.Get("X-RateLimit-Reset"), 10, 64); err == nil {
 			rate.Reset = reset
 		}
-		if resp.StatusCode == 403 || resp.StatusCode == 429 {
-			if rate.Failures < 32 {
-				rate.Failures++
-			}
-			rate.Blocked = blockedUntil(resp.Header, now, rate.Failures)
-			g.State.Counts["backoff"]++
-		} else if resp.StatusCode >= 200 && resp.StatusCode < 400 {
-			rate.Failures = 0
-			rate.Blocked = 0
-			if resp.Header.Get("X-RateLimit-Remaining") == "0" {
-				rate.Blocked = blockedUntil(resp.Header, now, 1)
-			}
-		}
-		g.State.Rates[id] = rate
 	}
+	// GraphQL can surface rate errors inside HTTP 200. Preserve the original
+	// bytes, but apply the same persistent cooldown and never cache partial data.
+	limitedQuery := false
+	if r.URL.Path == "/graphql" && resp.StatusCode == 200 {
+		b, err := io.ReadAll(io.LimitReader(resp.Body, 8*1024*1024+1))
+		if err != nil {
+			resp.Body.Close()
+			return failure(503, "upstream body unavailable")
+		}
+		if len(b) <= 8*1024*1024 {
+			resp.Body.Close()
+			resp.Body = io.NopCloser(bytes.NewReader(b))
+			resp.ContentLength = int64(len(b))
+			limitedQuery = rateLimitedQueryBody(b)
+		} else {
+			resp.Body = &joinedBody{Reader: io.MultiReader(bytes.NewReader(b), resp.Body), Closer: resp.Body}
+		}
+	}
+	if resp.StatusCode == 403 || resp.StatusCode == 429 || limitedQuery {
+		if rate.Failures < 32 {
+			rate.Failures++
+		}
+		rate.Blocked = blockedUntil(resp.Header, now, rate.Failures)
+		g.State.Counts["backoff"]++
+	} else if r.URL.Path != "/rate_limit" && resp.StatusCode >= 200 && resp.StatusCode < 400 {
+		rate.Failures = 0
+		rate.Blocked = 0
+		if resp.Header.Get("X-RateLimit-Remaining") == "0" {
+			rate.Blocked = blockedUntil(resp.Header, now, 1)
+		}
+	}
+	g.State.Rates[id] = rate
+
 	if resp.StatusCode == 304 && e.At <= 0 && r.Header.Get("If-None-Match") == "" && r.Header.Get("If-Modified-Since") == "" {
 		resp.Body.Close()
 		return failure(503, "304 without a cached representation")

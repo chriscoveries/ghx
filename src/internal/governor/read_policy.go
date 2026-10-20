@@ -53,11 +53,7 @@ func freshEntry(r *http.Request, e Entry, now int64) bool {
 			}
 		}
 	}
-	if poll, err := strconv.ParseInt(e.Header.Get("X-Poll-Interval"), 10, 64); err == nil && poll > ttl {
-		// Do not fetch earlier than GitHub's polling floor. A no-cache caller
-		// still revalidates before authoritative decisions.
-		ttl = poll
-	}
+
 	return now-e.At < ttl
 }
 
@@ -136,4 +132,23 @@ func (g *Gate) storeEntry(path string, entry Entry) error {
 		count--
 	}
 	return nil
+}
+
+func rateLimitedQueryBody(body []byte) bool {
+	var doc struct {
+		Errors []struct {
+			Message string
+			Type    string
+		}
+	}
+	if json.Unmarshal(body, &doc) != nil {
+		return false
+	}
+	for _, error := range doc.Errors {
+		message := strings.ToLower(error.Message)
+		if error.Type == "RATE_LIMITED" || strings.Contains(message, "rate limit") || strings.Contains(message, "secondary rate") {
+			return true
+		}
+	}
+	return false
 }
