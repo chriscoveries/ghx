@@ -385,3 +385,42 @@ func TestStatusReadsShareOneWindowAcrossLanes(t *testing.T) {
 		t.Fatal("non-status read skipped revalidation", calls)
 	}
 }
+
+// A repo-scoped write invalidates that repo's reads only. Wiping every repo
+// turns every other watching lane's next read into an upstream call, which is
+// how a cache ends up at a hit rate near zero while the box is being polite.
+func TestWriteInvalidatesOnlyItsRepo(t *testing.T) {
+	g := setup(t)
+	calls := map[string]int{}
+	g.Transport = transport(func(r *http.Request) (*http.Response, error) {
+		calls[r.URL.Path]++
+		return response(200, fixture(t), http.Header{"Etag": []string{`"r"`}}), nil
+	})
+	a := "/repos/o/a/pulls/1"
+	b := "/repos/o/b/pulls/1"
+	read := func(path string) *http.Response {
+		v := g.RoundTrip(req("GET", path), caller)
+		content(t, v)
+		return v
+	}
+	read(a)
+	read(b)
+	// A write in repo a.
+	write := g.RoundTrip(req("POST", "/repos/o/a/issues"), caller)
+	write.Body.Close()
+	// Repo a must go upstream again; repo b must still be served from cache.
+	read(a)
+	after := read(b)
+	if after.Header.Get("X-Ghgate-Cache") != "hit" {
+		t.Fatal("write in repo a dropped repo b's cached read")
+	}
+	if calls[a] != 2 || calls[b] != 1 {
+		t.Fatalf("calls a=%d b=%d", calls[a], calls[b])
+	}
+	// A non-repo write cannot be scoped, so it still clears everything.
+	write = g.RoundTrip(req("POST", "/notifications"), caller)
+	write.Body.Close()
+	if got := read(a); got.Header.Get("X-Ghgate-Cache") == "hit" {
+		t.Fatal("unscoped write left the cache intact")
+	}
+}

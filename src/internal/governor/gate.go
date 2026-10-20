@@ -45,6 +45,10 @@ type Entry struct {
 	At     int64
 	Header http.Header
 	Body   []byte
+	// URL is the path the entry was stored for (no query). Entries written
+	// before this field existed have it empty and are purged on any write,
+	// which is the conservative reading of an unknown scope.
+	URL string `json:"url,omitempty"`
 }
 type Caller struct {
 	Lane, Cwd, Class string
@@ -319,8 +323,15 @@ func (g *Gate) RoundTrip(r *http.Request, c Caller) (result *http.Response) {
 		return failure(403, reason)
 	}
 	if !read {
-		g.clearREST()
-		defer g.clearREST()
+		// A write invalidates what it can have changed. A repo-scoped write
+		// drops only that repo's reads: check-runs and run lists for other
+		// repos are untouched by it, and wiping them turns every watching lane
+		// into a revalidation. Anything else (GraphQL mutations, /user,
+		// /orgs, /notifications) can affect reads we cannot name, so it still
+		// clears the cache.
+		scope := repoScope(r.URL.Path)
+		g.clearREST(scope)
+		defer g.clearREST(scope)
 		if wait := time.Duration(g.State.NextWrite - g.Now().UnixNano()); wait > 0 {
 			time.Sleep(wait)
 		}
@@ -461,7 +472,7 @@ func (g *Gate) RoundTrip(r *http.Request, c Caller) (result *http.Response) {
 			resp.ContentLength = int64(len(b))
 			if !strings.Contains(resp.Header.Get("Cache-Control"), "no-store") && resp.Header.Get("Vary") != "*" {
 				if r.URL.Path != "/graphql" || cacheableQueryBody(b) {
-					if err = g.storeEntry(path, Entry{now, resp.Header.Clone(), b}); err != nil {
+					if err = g.storeEntry(path, Entry{At: now, URL: r.URL.Path, Header: resp.Header.Clone(), Body: b}); err != nil {
 						return failure(503, "cache save failed")
 					}
 				}
@@ -488,10 +499,31 @@ func (g *Gate) floor(category string) int {
 	return g.Policy.Floor
 }
 
-func (g *Gate) clearREST() {
+// repoScope returns the "/repos/OWNER/NAME" prefix a request path belongs to,
+// or "" when the request is not repo-scoped and a write must clear everything.
+func repoScope(path string) string {
+	parts := strings.Split(strings.TrimPrefix(path, "/"), "/")
+	if len(parts) >= 3 && parts[0] == "repos" {
+		return "/repos/" + parts[1] + "/" + parts[2]
+	}
+	return ""
+}
+
+func (g *Gate) clearREST(scope string) {
 	files, _ := filepath.Glob(filepath.Join(g.Dir, "rest", "*.json"))
 	for _, p := range files {
-		os.Remove(p)
+		if scope == "" {
+			os.Remove(p)
+			continue
+		}
+		b, err := os.ReadFile(p)
+		if err != nil {
+			continue
+		}
+		var e Entry
+		if json.Unmarshal(b, &e) != nil || e.URL == "" || strings.HasPrefix(e.URL, scope) {
+			os.Remove(p)
+		}
 	}
 }
 
