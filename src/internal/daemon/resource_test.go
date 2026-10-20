@@ -71,7 +71,7 @@ func TestResourceProjectionHitAndLongLivedFixedFields(t *testing.T) {
 		t.Fatalf("responses: first=%+v second=%+v calls=%d", first, second, calls.Load())
 	}
 	key := execctx.CacheKey(shape.Context, shape.Args)
-	expire(t, h, key, time.Minute)
+	expire(t, h, key, 6*time.Minute)
 	fixed := h.Handle(view("number,mergedAt,mergeCommit"))
 	if !fixed.Cached || calls.Load() != 1 {
 		t.Fatal("merged fixed fields expired with ordinary TTL")
@@ -259,7 +259,7 @@ func TestConditionalGETReuses304AndReplacesChangedBodies(t *testing.T) {
 	if !h.Handle(req).Cached || calls != 1 {
 		t.Fatal("fresh GET not reused")
 	}
-	expire(t, h, key, time.Minute)
+	expire(t, h, key, 6*time.Minute)
 	h.execute = func(_ context.Context, _ string, args []string, _ string, _ authenv.Environment) *executor.Result {
 		calls++
 		if !reflect.DeepEqual(args[len(req.Args):], []string{"--include", "--header", `If-None-Match: W/"captured"`}) {
@@ -271,7 +271,7 @@ func TestConditionalGETReuses304AndReplacesChangedBodies(t *testing.T) {
 	if !validated.Cached || !bytes.Equal(validated.Stdout, body) || calls != 2 || h.cache.Peek(key).IsExpired() {
 		t.Fatal("304 did not refresh original bytes")
 	}
-	expire(t, h, key, time.Minute)
+	expire(t, h, key, 6*time.Minute)
 	changed := captured(t, "pr22")
 	h.execute = func(context.Context, string, []string, string, authenv.Environment) *executor.Result {
 		return &executor.Result{Stdout: httpOutput(changed, 200, `"changed"`)}

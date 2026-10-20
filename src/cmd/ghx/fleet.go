@@ -45,7 +45,8 @@ func prepareFleet(args []string) error {
 	if _, err := os.ReadFile(filepath.Join(dir, "proxy-proof")); err != nil {
 		return fmt.Errorf("box gate unavailable; run devmsg box install-ghx")
 	}
-	os.Setenv("HTTPS_PROXY", governor.ProxyURL(addr, governor.Caller{Lane: caller, Class: "automation"}, dir))
+	_, noCache, _ := parseGHXFlags(args)
+	os.Setenv("HTTPS_PROXY", governor.ProxyURL(addr, governor.Caller{Lane: caller, Class: "automation", Revalidate: noCache}, dir))
 	os.Setenv("HTTP_PROXY", os.Getenv("HTTPS_PROXY"))
 	os.Setenv("NO_PROXY", "")
 	os.Setenv("SSL_CERT_FILE", filepath.Join(dir, "ca.pem"))

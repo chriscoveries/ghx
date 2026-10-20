@@ -66,6 +66,12 @@ func TestETag304AndWrites(t *testing.T) {
 	})
 	for i := 0; i < 2; i++ {
 		r := g.RoundTrip(req("GET", "/repos/o/r/pulls/479"), caller)
+		if i == 0 {
+			// Contract: revalidation requires an out-of-TTL entry — the shared
+			// TTL means same-moment calls are fresh hits, not 304 checks.
+			at := g.Now()
+			g.Now = func() time.Time { return at.Add(400 * time.Second) }
+		}
 		if r.StatusCode != 200 || !bytes.Equal(content(t, r), b) {
 			t.Fatal("304 failed to restore captured body")
 		}
@@ -181,6 +187,10 @@ func TestCallerBudgetAndOutage(t *testing.T) {
 	}
 	content(t, r)
 	g.Policy.Classes["owner"] = Class{Identity: "owner", Hourly: 150}
+	// Contract: stale requires an out-of-TTL entry — advance the clock past the
+	// shared read TTL so the outage path is exercised, not the fresh-hit path.
+	at := g.Now()
+	g.Now = func() time.Time { return at.Add(400 * time.Second) }
 	g.Transport = transport(func(r *http.Request) (*http.Response, error) { return nil, io.ErrUnexpectedEOF })
 	r = g.RoundTrip(req("GET", "/x"), caller)
 	if r.Header.Get("X-Ghgate-Stale") != "true" {
