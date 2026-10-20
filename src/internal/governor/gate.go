@@ -272,6 +272,13 @@ func (g *Gate) RoundTrip(r *http.Request, c Caller) (result *http.Response) {
 		}
 	}
 	stale := func(reason string) *http.Response {
+		// An explicit revalidation is a promise that the answer is current. A
+		// stale body carries its marker in a response header a CLI does not
+		// print (gh snapshot prints JSON only), so serving stale here would hand
+		// an authority caller an old approval it cannot detect. Fail instead.
+		if c.Revalidate {
+			return nil
+		}
 		if e.At > 0 && now-e.At <= 3600 {
 			g.State.Counts["stale"]++
 			h := e.Header.Clone()
@@ -447,7 +454,9 @@ func (g *Gate) RoundTrip(r *http.Request, c Caller) (result *http.Response) {
 			return failure(503, "cache save failed")
 		}
 		g.State.Counts["304"]++
-		g.State.Calls[caller] = g.State.Calls[caller][:len(g.State.Calls[caller])-1]
+		// A revalidation is a call: it leaves the box and spends a GitHub
+		// request even though 304 costs no quota. Keeping the stamp is what
+		// makes hour_calls a call count rather than a quota count.
 		resp = &http.Response{StatusCode: 200, Header: e.Header.Clone(), Body: io.NopCloser(bytes.NewReader(e.Body)), ContentLength: int64(len(e.Body))}
 	}
 	// D1: the block gates FUTURE requests; the fresh response just received is

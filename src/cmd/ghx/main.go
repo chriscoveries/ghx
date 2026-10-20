@@ -154,6 +154,8 @@ func handleSubcommand(cfg *config.Config, args []string) bool {
 		handleCache(cfg, args[1:])
 	case "ghcli":
 		handleGH(cfg, args[1:])
+	case "snapshot":
+		handleSnapshot(cfg, args[1:])
 	default:
 		return false
 	}
