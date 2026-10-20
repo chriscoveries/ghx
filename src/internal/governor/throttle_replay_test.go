@@ -59,6 +59,7 @@ func TestRecordedSharedGETAnd304(t *testing.T) {
 		t.Fatal(err)
 	}
 	first := capturedHTTP(t, "issue140.http")
+	firstETag := first.Header.Get("ETag")
 	now, err := http.ParseTime(first.Header.Get("Date"))
 	first.Body.Close()
 	if err != nil {
@@ -71,13 +72,18 @@ func TestRecordedSharedGETAnd304(t *testing.T) {
 		if calls == 1 {
 			return capturedHTTP(t, "issue140.http"), nil
 		}
-		if calls != 2 {
+		if calls > 3 {
 			t.Fatal("extra upstream request")
 		}
-		if r.Header.Get("If-None-Match") == "" {
-			t.Fatal("missing captured validator")
+		conditional := capturedHTTP(t, "issue140-conditional.http")
+		expectedETag := firstETag
+		if calls == 3 {
+			expectedETag = conditional.Header.Get("ETag")
 		}
-		return capturedHTTP(t, "issue140-conditional.http"), nil
+		if r.Header.Get("If-None-Match") != expectedETag {
+			t.Fatal("incorrect captured validator")
+		}
+		return conditional, nil
 	})
 	owner := Caller{Lane: "lab-sol-b", Class: "owner"}
 	one := g.RoundTrip(recordedRequest(t), owner)
@@ -108,6 +114,15 @@ func TestRecordedSharedGETAnd304(t *testing.T) {
 	three.Body.Close()
 	if err != nil || three.StatusCode != 200 || !bytes.Equal(body, threeBody) || calls != 2 || g.State.Counts["304"] != 1 {
 		t.Fatal("captured 304 was not restored", calls, err)
+	}
+	// Native ghx --no-cache/GHX_NO_CACHE must bypass the shared gate TTL too.
+	noCache := owner
+	noCache.Revalidate = true
+	native := g.RoundTrip(recordedRequest(t), noCache)
+	nativeBody, err := io.ReadAll(native.Body)
+	native.Body.Close()
+	if err != nil || !bytes.Equal(body, nativeBody) || calls != 3 || g.State.Counts["304"] != 2 {
+		t.Fatal("native no-cache did not revalidate", calls, err)
 	}
 	// Reload the real files emitted by this gate, rather than hand-building state.
 	restarted, err := New(g.Dir)

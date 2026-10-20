@@ -48,6 +48,7 @@ type Entry struct {
 type Caller struct {
 	Lane, Cwd, Class string
 	Essential        bool
+	Revalidate       bool
 }
 type Gate struct {
 	Dir        string
@@ -157,6 +158,9 @@ func (g *Gate) RoundTrip(r *http.Request, c Caller) (result *http.Response) {
 	r = r.Clone(r.Context())
 	r.RequestURI = ""
 	r.Header = r.Header.Clone()
+	if c.Revalidate {
+		r.Header.Set("Cache-Control", "no-cache")
+	}
 	if name := g.Policy.Tokens[cls.Identity]; name != "" {
 		token := os.Getenv(name)
 		if token == "" {
