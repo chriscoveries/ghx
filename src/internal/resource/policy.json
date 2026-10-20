@@ -7,6 +7,7 @@
     "fields": "number,id,title,url,body,state,createdAt,updatedAt,closedAt,author,labels,assignees,milestone,comments"
   },
   "run": {
-    "fields": "databaseId,number,displayTitle,headBranch,headSha,event,status,conclusion,createdAt,startedAt,updatedAt,url,workflowName,workflowDatabaseId,jobs,attempt"
+    "fields": "databaseId,number,displayTitle,headBranch,headSha,event,status,conclusion,createdAt,startedAt,updatedAt,url,workflowName,workflowDatabaseId,jobs,attempt",
+    "listFields": "conclusion,createdAt,databaseId,displayTitle,event,headBranch,headSha,name,number,startedAt,status,updatedAt,url,workflowDatabaseId,workflowName"
   }
 }

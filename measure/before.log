@@ -1,0 +1,28 @@
+2026-10-20T14:02:23Z
+Uptime:          50m 48s
+Total Requests:  281
+Cache Hits:      85 (36.3%)
+Cache Misses:    149
+Passthrough:     47
+Coalesced:       0
+Revalidated:     0 (304 responses)
+Cache Size:      125 / 1000 entries
+Cache Bytes:     1934356 / 67108864 bytes
+Cache Rejected:  0
+
+Top Commands:
+  pr merge                 0 hits / 0 misses  (0.0%)
+  issue view               0 hits / 2 misses  (0.0%)
+  pr list                  0 hits / 6 misses  (0.0%)
+  api -X                   0 hits / 0 misses  (0.0%)
+  api graphql              0 hits / 0 misses  (0.0%)
+  issue list               0 hits / 1 misses  (0.0%)
+  pr create                0 hits / 0 misses  (0.0%)
+  pr view                  12 hits / 30 misses  (28.6%)
+  run list                 1 hits / 21 misses  (4.5%)
+  run view                 38 hits / 22 misses  (63.3%)
+  api --method             0 hits / 0 misses  (0.0%)
+  api get                  28 hits / 57 misses  (32.9%)
+  api repos/chriscoveries/wick/issues/comments/6292122167 0 hits / 0 misses  (0.0%)
+  pr checks                6 hits / 10 misses  (37.5%)
+  pr comment               0 hits / 0 misses  (0.0%)

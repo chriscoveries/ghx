@@ -131,6 +131,21 @@ func (h *Handler) handleExec(req *protocol.Request) *protocol.Response {
 				return response
 			}
 		}
+		if shape := resource.PrepareList(req.Context, req.Args); shape != nil {
+			if e := h.cache.Get(execctx.CacheKey(req.Context, req.Args)); e != nil {
+				h.stats.Record(cmdKey, e.Key, metrics.ResultHit, time.Since(start).Seconds()*1000)
+				return &protocol.Response{Stdout: e.Stdout, Stderr: e.Stderr, ExitCode: e.ExitCode, Cached: true}
+			}
+			// A collection read can carry validators, so an expired body is
+			// revalidated instead of refetched. Anything unserviceable falls
+			// through to the shared superset/native path below.
+			if response := h.handleConditionalList(req, shape, cmdKey); response != nil {
+				return response
+			}
+			if response := h.handleResource(req, shape, classification); response != nil {
+				return response
+			}
+		}
 	}
 
 	// Non-cacheable: execute directly via daemon (captures output)

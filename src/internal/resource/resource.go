@@ -18,8 +18,9 @@ import (
 var policyJSON []byte
 
 type fieldPolicy struct {
-	Fields    string   `json:"fields"`
-	Immutable []string `json:"immutable"`
+	Fields     string   `json:"fields"`
+	ListFields string   `json:"listFields"`
+	Immutable  []string `json:"immutable"`
 }
 
 var policies = func() map[string]fieldPolicy {
@@ -35,9 +36,23 @@ type Shape struct {
 	Args, Fields           []string
 	JQ, Template, Kind, ID string
 	Attempt                bool
+	// List marks a collection read: the cached body is the widest form of the
+	// query and each caller's fields and row count are projected out of it.
+	List  bool
+	Limit int
+	// Filters are the canonical collection filters this read carries; the
+	// conditional fetcher maps them onto upstream query parameters.
+	Filters map[string]string
 }
 
+// ListFields is the widest field set a collection command can emit. It is the
+// form cached once and projected per caller.
+func ListFields(kind string) string { return policies[kind].ListFields }
+
 func (s *Shape) Valid(body []byte) bool {
+	if s.List {
+		return validList(s, body)
+	}
 	var data map[string]json.RawMessage
 	if json.Unmarshal(body, &data) != nil {
 		return false
@@ -149,6 +164,9 @@ func Prepare(ctx execctx.ExecContext, args []string) *Shape {
 }
 
 func (s *Shape) Project(body []byte) ([]byte, error) {
+	if s.List {
+		return projectList(s, body)
+	}
 	var data map[string]json.RawMessage
 	if e := json.Unmarshal(body, &data); e != nil {
 		return nil, e
