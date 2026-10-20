@@ -105,6 +105,33 @@ func (g *Gate) persist() error {
 	}
 	return save(filepath.Join(g.Dir, "fleet-status.json"), map[string]any{"at": g.Now().UTC(), "findings": findings, "counts": g.State.Counts})
 }
+
+// bodyReadDeadline bounds the mutex-held upstream body read (D4).
+const bodyReadDeadline = 30 * time.Second
+
+// readAllDeadline bounds a body read while the gate mutex is held: on expiry
+// the body is closed so a hung upstream cannot serialize the governor (D4).
+func readAllDeadline(body io.ReadCloser, limit int64, timeout time.Duration) ([]byte, error) {
+	type result struct {
+		b   []byte
+		err error
+	}
+	done := make(chan result, 1)
+	go func() {
+		b, err := io.ReadAll(io.LimitReader(body, limit+1))
+		done <- result{b, err}
+	}()
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case r := <-done:
+		return r.b, r.err
+	case <-timer.C:
+		body.Close()
+		return nil, fmt.Errorf("upstream body read exceeded %s deadline", timeout)
+	}
+}
+
 func failure(code int, msg string) *http.Response {
 	b, _ := json.Marshal(map[string]string{"message": "ghgate: " + msg})
 	return &http.Response{StatusCode: code, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(bytes.NewReader(b)), ContentLength: int64(len(b))}
@@ -216,6 +243,8 @@ func (g *Gate) RoundTrip(r *http.Request, c Caller) (result *http.Response) {
 	}
 	floor := g.floor(category)
 	reason := ""
+	// /rate_limit is free measurement: never budgeted, refused or upstream-counted.
+	freeMeasurement := r.URL.Path == "/rate_limit"
 	for k, v := range g.State.Rates {
 		if strings.HasPrefix(k, cls.Identity+"/") && v.Blocked > now && v.Blocked > rate.Blocked {
 			rate.Blocked = v.Blocked
@@ -259,7 +288,7 @@ func (g *Gate) RoundTrip(r *http.Request, c Caller) (result *http.Response) {
 		reason = "caller hourly budget exceeded; inspect ghx xcache stats"
 	}
 
-	if reason != "" {
+	if reason != "" && !freeMeasurement {
 		g.State.Counts["refused"]++
 		if v := stale(reason); read && v != nil {
 			return v
@@ -283,17 +312,21 @@ func (g *Gate) RoundTrip(r *http.Request, c Caller) (result *http.Response) {
 	} else if r.Method == "GET" && cacheable && e.Header.Get("Last-Modified") != "" {
 		r.Header.Set("If-Modified-Since", e.Header.Get("Last-Modified"))
 	}
-	g.State.Calls[caller] = append(kept, now)
-	g.State.Calls["box"] = append(boxCalls, now)
-	if read {
-		g.State.Calls[repeatKey] = append(repeated, now)
+	if !freeMeasurement {
+		g.State.Calls[caller] = append(kept, now)
+		g.State.Calls["box"] = append(boxCalls, now)
+		if read {
+			g.State.Calls[repeatKey] = append(repeated, now)
+		}
 	}
 	for k, v := range g.State.Calls {
 		if strings.HasPrefix(k, "read:") && len(v) > 0 && v[len(v)-1] <= now-60 {
 			delete(g.State.Calls, k)
 		}
 	}
-	g.State.Counts["upstream"]++
+	if !freeMeasurement {
+		g.State.Counts["upstream"]++
+	}
 	if c.Lane == "" {
 		g.State.Counts["unattributed"]++
 	}
@@ -308,7 +341,9 @@ func (g *Gate) RoundTrip(r *http.Request, c Caller) (result *http.Response) {
 		}
 		return failure(503, "upstream unavailable")
 	}
+	freshUpstream := true
 	// /rate_limit can disagree with real request headers; it never clears a block/floor.
+	// D3: rate introspection is exempt from the cooldown block itself.
 	if r.URL.Path != "/rate_limit" {
 		observed := resp.Header.Get("X-RateLimit-Resource")
 		if observed != "" {
@@ -326,7 +361,7 @@ func (g *Gate) RoundTrip(r *http.Request, c Caller) (result *http.Response) {
 	// bytes, but apply the same persistent cooldown and never cache partial data.
 	limitedQuery := false
 	if r.URL.Path == "/graphql" && resp.StatusCode == 200 {
-		b, err := io.ReadAll(io.LimitReader(resp.Body, 8*1024*1024+1))
+		b, err := readAllDeadline(resp.Body, 8*1024*1024, bodyReadDeadline)
 		if err != nil {
 			resp.Body.Close()
 			return failure(503, "upstream body unavailable")
@@ -340,7 +375,14 @@ func (g *Gate) RoundTrip(r *http.Request, c Caller) (result *http.Response) {
 			resp.Body = &joinedBody{Reader: io.MultiReader(bytes.NewReader(b), resp.Body), Closer: resp.Body}
 		}
 	}
-	if resp.StatusCode == 403 || resp.StatusCode == 429 || limitedQuery {
+	// D2 (seat ruling): cool down on rate-limit signals only — a permission
+	// denial is not a rate signal. Rate-limit 403s carry Retry-After or a
+	// depleted Remaining counter; plain denials carry neither.
+	rateLimited := resp.StatusCode == 429 || limitedQuery ||
+		(resp.StatusCode == 403 &&
+			(resp.Header.Get("Retry-After") != "" ||
+				resp.Header.Get("X-RateLimit-Remaining") == "0"))
+	if rateLimited {
 		if rate.Failures < 32 {
 			rate.Failures++
 		}
@@ -363,6 +405,12 @@ func (g *Gate) RoundTrip(r *http.Request, c Caller) (result *http.Response) {
 		resp.Body.Close()
 		e.At = now
 		for name, values := range resp.Header {
+			// 304 carries no representation: framing headers describe the empty
+			// response, not the cached body (review: Content-Length: 0 poisoned
+			// the stored entry).
+			if name == "Content-Length" || name == "Transfer-Encoding" || name == "Content-Encoding" || name == "Content-Range" {
+				continue
+			}
 			e.Header[name] = values
 		}
 		if err := save(path, e); err != nil {
@@ -373,7 +421,9 @@ func (g *Gate) RoundTrip(r *http.Request, c Caller) (result *http.Response) {
 		g.State.Calls["box"] = g.State.Calls["box"][:len(g.State.Calls["box"])-1]
 		resp = &http.Response{StatusCode: 200, Header: e.Header.Clone(), Body: io.NopCloser(bytes.NewReader(e.Body)), ContentLength: int64(len(e.Body))}
 	}
-	if rate.Blocked > now && read && resp.StatusCode != 403 && resp.StatusCode != 429 {
+	// D1: the block gates FUTURE requests; the fresh response just received is
+	// returned before cooling — never swap a real upstream answer for stale/403.
+	if rate.Blocked > now && read && r.URL.Path != "/rate_limit" && !freshUpstream && resp.StatusCode != 403 && resp.StatusCode != 429 {
 		resp.Body.Close()
 		if v := stale("blocked"); v != nil {
 			resp = v
@@ -382,7 +432,7 @@ func (g *Gate) RoundTrip(r *http.Request, c Caller) (result *http.Response) {
 		}
 	}
 	if cacheable && resp.StatusCode == 200 && resp.Header.Get("X-Ghgate-Stale") == "" {
-		b, err := io.ReadAll(io.LimitReader(resp.Body, 8*1024*1024+1))
+		b, err := readAllDeadline(resp.Body, 8*1024*1024, bodyReadDeadline)
 		if err != nil {
 			resp.Body.Close()
 			return failure(503, "upstream body unavailable")
