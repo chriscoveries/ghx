@@ -160,7 +160,7 @@ func TestQueryClassificationAndIdentity(t *testing.T) {
 		}
 	}
 	g := setup(t)
-	g.Policy.Classes["automation"] = Class{Identity: "machine", Hourly: 3}
+	g.Policy.Classes["automation"] = Class{Identity: "machine"}
 	g.Policy.Tokens["machine"] = "GHGATE_TEST_TOKEN"
 	t.Setenv("GHGATE_TEST_TOKEN", "fixture-machine")
 	b := fixture(t)
@@ -176,23 +176,24 @@ func TestQueryClassificationAndIdentity(t *testing.T) {
 }
 func TestCallerBudgetAndOutage(t *testing.T) {
 	g := setup(t)
-	g.Policy.Classes["owner"] = Class{Identity: "owner", Hourly: 1}
 	g.Transport = transport(func(r *http.Request) (*http.Response, error) {
 		return response(200, fixture(t), http.Header{"Etag": []string{`"a"`}}), nil
 	})
-	content(t, g.RoundTrip(req("GET", "/x"), caller))
-	r := g.RoundTrip(req("GET", "/new"), caller)
-	if r.StatusCode != 403 {
-		t.Fatal("caller budget not enforced")
+	// A single caller is never refused for volume: 200 distinct reads in one
+	// hour, all served. Only GitHub's own signals refuse a read.
+	for n := 0; n < 100; n++ {
+		r := g.RoundTrip(req("GET", "/x?"+strconv.Itoa(n)), caller)
+		if r.StatusCode != 200 {
+			t.Fatalf("caller refused at %d: %d", n, r.StatusCode)
+		}
+		content(t, r)
 	}
-	content(t, r)
-	g.Policy.Classes["owner"] = Class{Identity: "owner", Hourly: 150}
 	// Contract: stale requires an out-of-TTL entry — advance the clock past the
 	// shared read TTL so the outage path is exercised, not the fresh-hit path.
 	at := g.Now()
 	g.Now = func() time.Time { return at.Add(400 * time.Second) }
 	g.Transport = transport(func(r *http.Request) (*http.Response, error) { return nil, io.ErrUnexpectedEOF })
-	r = g.RoundTrip(req("GET", "/x"), caller)
+	r := g.RoundTrip(req("GET", "/x?99"), caller)
 	if r.Header.Get("X-Ghgate-Stale") != "true" {
 		t.Fatal("outage didn't serve stale")
 	}
@@ -203,7 +204,7 @@ func BenchmarkLocalMiss(b *testing.B) {
 	if e != nil {
 		b.Fatal(e)
 	}
-	g.Policy.Classes["owner"] = Class{Identity: "owner", Hourly: 1000000}
+	g.Policy.Classes["owner"] = Class{Identity: "owner"}
 	payload, _ := os.ReadFile("../../../testdata/pr-description.json")
 	g.Transport = transport(func(r *http.Request) (*http.Response, error) { return response(200, payload, http.Header{}), nil })
 	b.ResetTimer()
@@ -267,7 +268,7 @@ func TestNamedGraphQLOperationsAndQuotedMutation(t *testing.T) {
 
 func TestRESTCacheBoundAndAmbiguousWriteInvalidation(t *testing.T) {
 	g := setup(t)
-	g.Policy.Classes["owner"] = Class{Identity: "owner", Hourly: 1000}
+	g.Policy.Classes["owner"] = Class{Identity: "owner"}
 	g.Transport = transport(func(r *http.Request) (*http.Response, error) {
 		return response(200, fixture(t), http.Header{"Etag": []string{`"bounded"`}}), nil
 	})
@@ -291,19 +292,24 @@ func TestRepeatedGraphQLReadAndRemainingZero(t *testing.T) {
 	calls := 0
 	g.Transport = transport(func(r *http.Request) (*http.Response, error) {
 		calls++
-		return response(200, fixture(t), http.Header{}), nil
+		return response(200, []byte(`{"data":{"viewer":{"login":"fixture"}}}`), http.Header{}), nil
 	})
 	for n := 0; n < 4; n++ {
 		r := req("POST", "/graphql")
 		r.Body = io.NopCloser(strings.NewReader(`{"query":"query {viewer{login}}"}`))
 		v := g.RoundTrip(r, caller)
 		content(t, v)
-		if n == 3 && v.StatusCode != 403 {
-			t.Fatal("repeated read went upstream")
+		if v.StatusCode != 200 {
+			t.Fatalf("repeated read refused: %d", v.StatusCode)
+		}
+		if n > 0 && v.Header.Get("X-Ghgate-Cache") != "hit" {
+			t.Fatalf("repeat %d did not come from the shared cache", n)
 		}
 	}
-	if calls != 3 {
-		t.Fatal(calls)
+	// One upstream read serves every caller inside the shared window; repeats
+	// are hits, never refusals.
+	if calls != 1 {
+		t.Fatal("repeated read went upstream", calls)
 	}
 	g.Transport = transport(func(r *http.Request) (*http.Response, error) {
 		calls++
@@ -321,18 +327,100 @@ func TestRepeatedGraphQLReadAndRemainingZero(t *testing.T) {
 func TestBoxBudgetAndFreeRateLimit(t *testing.T) {
 	g := setup(t)
 	g.Transport = transport(func(r *http.Request) (*http.Response, error) { return response(200, fixture(t), http.Header{}), nil })
-	g.Policy.BoxHourly = 1
+	// Two lanes reading two resources is not a shared budget: the box cap is
+	// gone, so both reads go through and are only attributed.
 	first := g.RoundTrip(req("GET", "/repos/chriscoveries/ghx/pulls/21"), Caller{Lane: "runner-a", Class: "automation"})
 	first.Body.Close()
 	second := g.RoundTrip(req("GET", "/repos/chriscoveries/ghx/pulls/22"), Caller{Lane: "runner-b", Class: "automation"})
 	defer second.Body.Close()
-	if second.StatusCode != 403 {
-		t.Fatal("shared box budget bypassed", second.StatusCode)
+	if first.StatusCode != 200 || second.StatusCode != 200 {
+		t.Fatalf("box cap still refuses: %d %d", first.StatusCode, second.StatusCode)
+	}
+	if got := g.HourCalls(); got["runner-a"] != 1 || got["runner-b"] != 1 {
+		t.Fatalf("callers not attributed: %v", got)
 	}
 	before := g.State.Counts["upstream"]
 	free := g.RoundTrip(req("GET", "/rate_limit"), Caller{Lane: "measurement", Class: "automation"})
 	free.Body.Close()
 	if free.StatusCode != 200 || g.State.Counts["upstream"] != before {
 		t.Fatal("free measurement budgeted")
+	}
+}
+
+func TestStatusReadsShareOneWindowAcrossLanes(t *testing.T) {
+	g := setup(t)
+	calls := 0
+	g.Transport = transport(func(r *http.Request) (*http.Response, error) {
+		calls++
+		return response(200, fixture(t), http.Header{
+			"Etag":          []string{`"status"`},
+			"Cache-Control": []string{"private, max-age=60"},
+		}), nil
+	})
+	// Lane A reads the checks; GitHub advertises only 60s of freshness.
+	content(t, g.RoundTrip(req("GET", "/repos/o/r/commits/main/check-runs"), Caller{Lane: "lane-a", Class: "automation"}))
+	at := g.Now()
+	g.Now = func() time.Time { return at.Add(90 * time.Second) }
+	// Lane B asks 90s later: still inside the shared status window, so it is
+	// the same upstream read, not a second one and not a refusal.
+	second := g.RoundTrip(req("GET", "/repos/o/r/commits/main/check-runs"), Caller{Lane: "lane-b", Class: "automation"})
+	content(t, second)
+	if second.Header.Get("X-Ghgate-Cache") != "hit" {
+		t.Fatal("status read missed the shared window")
+	}
+	if calls != 1 {
+		t.Fatal("status read went upstream twice", calls)
+	}
+	// A non-status read keeps honouring the shorter upstream max-age.
+	content(t, g.RoundTrip(req("GET", "/repos/o/r/pulls/1"), Caller{Lane: "lane-a", Class: "automation"}))
+	later := g.Now()
+	g.Now = func() time.Time { return later.Add(90 * time.Second) }
+	before := calls
+	g.Transport = transport(func(r *http.Request) (*http.Response, error) {
+		calls++
+		return response(304, nil, http.Header{"Etag": []string{`"pull"`}}), nil
+	})
+	content(t, g.RoundTrip(req("GET", "/repos/o/r/pulls/1"), Caller{Lane: "lane-b", Class: "automation"}))
+	if calls != before+1 {
+		t.Fatal("non-status read skipped revalidation", calls)
+	}
+}
+
+// A repo-scoped write invalidates that repo's reads only. Wiping every repo
+// turns every other watching lane's next read into an upstream call, which is
+// how a cache ends up at a hit rate near zero while the box is being polite.
+func TestWriteInvalidatesOnlyItsRepo(t *testing.T) {
+	g := setup(t)
+	calls := map[string]int{}
+	g.Transport = transport(func(r *http.Request) (*http.Response, error) {
+		calls[r.URL.Path]++
+		return response(200, fixture(t), http.Header{"Etag": []string{`"r"`}}), nil
+	})
+	a := "/repos/o/a/pulls/1"
+	b := "/repos/o/b/pulls/1"
+	read := func(path string) *http.Response {
+		v := g.RoundTrip(req("GET", path), caller)
+		content(t, v)
+		return v
+	}
+	read(a)
+	read(b)
+	// A write in repo a.
+	write := g.RoundTrip(req("POST", "/repos/o/a/issues"), caller)
+	write.Body.Close()
+	// Repo a must go upstream again; repo b must still be served from cache.
+	read(a)
+	after := read(b)
+	if after.Header.Get("X-Ghgate-Cache") != "hit" {
+		t.Fatal("write in repo a dropped repo b's cached read")
+	}
+	if calls[a] != 2 || calls[b] != 1 {
+		t.Fatalf("calls a=%d b=%d", calls[a], calls[b])
+	}
+	// A non-repo write cannot be scoped, so it still clears everything.
+	write = g.RoundTrip(req("POST", "/notifications"), caller)
+	write.Body.Close()
+	if got := read(a); got.Header.Get("X-Ghgate-Cache") == "hit" {
+		t.Fatal("unscoped write left the cache intact")
 	}
 }

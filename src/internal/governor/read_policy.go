@@ -14,6 +14,30 @@ import (
 
 const readTTLSeconds int64 = 300
 
+// statusRead names the reads the fleet polls to watch CI: run lists/views,
+// check runs and suites, commit statuses, and GraphQL queries (gh's status
+// commands). They get the shared StatusTTL window.
+func statusRead(r *http.Request) bool {
+	path := r.URL.Path
+	return path == "/graphql" ||
+		strings.HasSuffix(path, "/check-runs") ||
+		strings.HasSuffix(path, "/check-suites") ||
+		strings.HasSuffix(path, "/statuses") ||
+		strings.HasSuffix(path, "/status") ||
+		strings.Contains(path, "/actions/runs") ||
+		strings.Contains(path, "/actions/workflows")
+}
+
+// readTTL is how long a stored read stays authoritative without going
+// upstream. Status reads keep one shared window for the whole box; ordinary
+// reads keep the default and still honour a shorter upstream max-age.
+func (g *Gate) readTTL(r *http.Request) int64 {
+	if statusRead(r) && g.Policy.StatusTTL > 0 {
+		return g.Policy.StatusTTL
+	}
+	return readTTLSeconds
+}
+
 // Cache identity describes the representation and credential, not the lane's
 // transport or conditional validator. Authorization remains inside the hash.
 func readKey(r *http.Request, body []byte) string {
@@ -39,17 +63,24 @@ func directive(h http.Header, wanted string) bool {
 	return false
 }
 
-func freshEntry(r *http.Request, e Entry, now int64) bool {
+func freshEntry(r *http.Request, e Entry, now, ttl int64) bool {
 	if e.At <= 0 || now < e.At || directive(r.Header, "no-cache") || directive(r.Header, "no-store") ||
 		r.Header.Get("Pragma") == "no-cache" || directive(e.Header, "no-cache") || directive(e.Header, "no-store") {
 		return false
 	}
-	ttl := readTTLSeconds
-	for _, item := range strings.Split(strings.ToLower(e.Header.Get("Cache-Control")), ",") {
-		key, value, _ := strings.Cut(strings.TrimSpace(item), "=")
-		if key == "max-age" {
-			if seconds, err := strconv.ParseInt(strings.Trim(value, `"`), 10, 64); err == nil && seconds < ttl {
-				ttl = seconds
+	if ttl <= 0 {
+		ttl = readTTLSeconds
+	}
+	// Status reads are shared box-wide on their own window: GitHub advertises a
+	// 60s max-age on check-runs, but many lanes poll the same repo far faster
+	// than that, and one upstream read per window is what removes the load.
+	if !statusRead(r) {
+		for _, item := range strings.Split(strings.ToLower(e.Header.Get("Cache-Control")), ",") {
+			key, value, _ := strings.Cut(strings.TrimSpace(item), "=")
+			if key == "max-age" {
+				if seconds, err := strconv.ParseInt(strings.Trim(value, `"`), 10, 64); err == nil && seconds < ttl {
+					ttl = seconds
+				}
 			}
 		}
 	}

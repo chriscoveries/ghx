@@ -30,7 +30,7 @@ func (g *Gate) Start(addr string) (net.Listener, error) {
 		if r.Method == "GET" && r.URL.Path == "/health" {
 			g.mu.Lock()
 			defer g.mu.Unlock()
-			json.NewEncoder(w).Encode(map[string]any{"counts": g.State.Counts, "box_hourly": g.Policy.BoxHourly, "hour_calls": len(g.keep("box", g.Now().Unix()-3600))})
+			json.NewEncoder(w).Encode(map[string]any{"counts": g.State.Counts, "hit_rate": g.HitRate(), "hour_calls": g.HourCalls(), "floor": g.Policy.Floor, "status_ttl": g.Policy.StatusTTL})
 			return
 		}
 		if r.Method != "CONNECT" {
