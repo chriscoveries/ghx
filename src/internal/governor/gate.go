@@ -158,11 +158,34 @@ func (g *Gate) HitRate() float64 {
 
 // HourCalls reports the last hour's calls per caller. Attribution and
 // reporting only: no count here refuses a call.
+// HitCalls is the same last-hour window for reads answered from the shared
+// cache, per caller. It is the reuse half of the report: HourCalls is what the
+// box spent, HitCalls is what it saved.
+func (g *Gate) HitCalls() map[string]int64 {
+	out := map[string]int64{}
+	after := g.Now().Unix() - 3600
+	for key, calls := range g.State.Calls {
+		if !strings.HasPrefix(key, "hit:") {
+			continue
+		}
+		var count int64
+		for _, at := range calls {
+			if at > after {
+				count++
+			}
+		}
+		if count > 0 {
+			out[strings.TrimPrefix(key, "hit:")] = count
+		}
+	}
+	return out
+}
+
 func (g *Gate) HourCalls() map[string]int64 {
 	out := map[string]int64{}
 	after := g.Now().Unix() - 3600
 	for key, calls := range g.State.Calls {
-		if strings.HasPrefix(key, "read:") || key == "box" {
+		if strings.HasPrefix(key, "read:") || strings.HasPrefix(key, "hit:") || key == "box" {
 			continue
 		}
 		var count int64
@@ -307,18 +330,22 @@ func (g *Gate) RoundTrip(r *http.Request, c Caller) (result *http.Response) {
 	// The gate is the one serialized cache for the whole box. An ordinary
 	// fresh hit consumes no caller/upstream budget. Explicit no-cache reads
 	// always revalidate and cannot use this path for authority decisions.
+	// Attribution only: the per-caller hour count is reported, never enforced.
+	caller := c.Lane
+	if caller == "" {
+		caller = c.Cwd
+	}
 	if reason == "" && cacheable && freshEntry(r, e, now, g.readTTL(r)) {
 		g.State.Counts["hit"]++
+		// A hit costs the box nothing, but it is still this caller being served:
+		// without this stamp the report cannot tell a lane that reads once from
+		// a lane that reads a hundred times and is answered by the cache.
+		g.State.Calls["hit:"+caller] = append(g.keep("hit:"+caller, now-3600), now)
 		_ = os.Chtimes(path, g.Now(), g.Now())
 		h := e.Header.Clone()
 		h.Set("Age", strconv.FormatInt(now-e.At, 10))
 		h.Set("X-Ghgate-Cache", "hit")
 		return &http.Response{StatusCode: 200, Header: h, Body: io.NopCloser(bytes.NewReader(e.Body)), ContentLength: int64(len(e.Body))}
-	}
-	// Attribution only: the per-caller hour count is reported, never enforced.
-	caller := c.Lane
-	if caller == "" {
-		caller = c.Cwd
 	}
 	kept := g.keep(caller, now-3600)
 

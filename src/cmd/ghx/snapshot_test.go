@@ -113,3 +113,41 @@ func TestSnapshotFreshIsEncodedInTheProxyCaller(t *testing.T) {
 		t.Fatal("stale GHX_NO_CACHE survived a shared snapshot")
 	}
 }
+
+func TestSplitGHResponseFindsBodyAndStaleMarker(t *testing.T) {
+	raw := []byte("HTTP/2.0 200 OK\r\nContent-Type: application/json\r\nX-Ghgate-Stale: true\r\nAge: 412\r\n\r\n{\"data\":{\"repository\":{\"nameWithOwner\":\"o/r\"}}}\n")
+	header, body, ok := splitGHResponse(raw)
+	if !ok {
+		t.Fatal("headers not split from body")
+	}
+	if strings.Contains(string(body), "HTTP/2.0") || !strings.HasPrefix(string(body), "{\"data\"") {
+		t.Fatalf("body carries header text: %q", body)
+	}
+	if header["x-ghgate-stale"] != "true" || header["age"] != "412" {
+		t.Fatalf("stale marker lost: %v", header)
+	}
+	if code := staleExit(header, false); code != 3 {
+		t.Fatalf("stale accepted silently, exit %d", code)
+	}
+	if code := staleExit(header, true); code != 0 {
+		t.Fatalf("--allow-stale did not accept, exit %d", code)
+	}
+	// A fresh read passes, and a body with no header block is not mangled.
+	if code := staleExit(map[string]string{"age": "0"}, false); code != 0 {
+		t.Fatalf("fresh read refused, exit %d", code)
+	}
+	if _, body, ok := splitGHResponse([]byte("{\"data\":{}}")); ok || string(body) != "{\"data\":{}}" {
+		t.Fatal("a bodyless-header response was split")
+	}
+}
+
+func TestSnapshotAsksGHForHeaders(t *testing.T) {
+	opts, err := parseSnapshotArgs([]string{"-R", "o/r"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	args := strings.Join(snapshotGHArgs(opts), " ")
+	if !strings.Contains(args, "api graphql -i") {
+		t.Fatalf("snapshot does not request headers, so staleness is invisible: %s", args)
+	}
+}
