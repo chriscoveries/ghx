@@ -23,11 +23,16 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - name: Build
-        run: go build ./...
+      # `go build` and `go test -race` compile different variants (the race
+      # build cannot reuse the plain cache) — today they run as two full
+      # serial compiles. Concurrent saves ~one build's wall (parallel steps,
+      # runner >=2.331); the group joins before upload.
+      - parallel:
+          - name: Build
+            run: go build ./...
 
-      - name: Test
-        run: go test -v -race -coverprofile coverage.out ./...
+          - name: Test
+            run: go test -v -race -coverprofile coverage.out ./...
 
       - name: Upload coverage
         if: matrix.os == 'ubuntu-latest'
@@ -45,13 +50,14 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - name: Vet
-        run: go vet ./...
+      - parallel:
+          - name: Vet
+            run: go vet ./...
 
-      - name: Check formatting
-        run: |
-          gofmt -l .
-          test -z "$(gofmt -l .)"
+          - name: Check formatting
+            run: |
+              gofmt -l .
+              test -z "$(gofmt -l .)"
 
   daily-test:
     if: github.event_name != 'pull_request'
@@ -67,11 +73,12 @@ jobs:
         with:
           go-version: ${{ matrix.go-version }}
 
-      - name: Build
-        run: go build ./...
+      - parallel:
+          - name: Build
+            run: go build ./...
 
-      - name: Test
-        run: go test -v -race -count=1 ./...
+          - name: Test
+            run: go test -v -race -count=1 ./...
 
-      - name: Vet
-        run: go vet ./...
+          - name: Vet
+            run: go vet ./...
