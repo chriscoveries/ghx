@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"os/exec"
@@ -91,6 +92,7 @@ type snapshotOptions struct {
 	owner, name string
 	limit       int
 	fresh       bool
+	allowStale  bool
 }
 
 // parseSnapshotArgs is pure so the flag contract can be tested without a gh
@@ -128,6 +130,8 @@ func parseSnapshotArgs(args []string) (snapshotOptions, error) {
 			opts.limit = n
 		case a == "--fresh":
 			opts.fresh = true
+		case a == "--allow-stale":
+			opts.allowStale = true
 		default:
 			return opts, fmt.Errorf("unknown argument %q", a)
 		}
@@ -140,9 +144,12 @@ func parseSnapshotArgs(args []string) (snapshotOptions, error) {
 	return opts, nil
 }
 
+// snapshotGHArgs asks gh for the response headers as well as the body: the
+// gate's staleness marker lives in X-Ghgate-Stale, and a JSON-only reader that
+// does not look for it cannot tell a shared read from an obsolete one.
 func snapshotGHArgs(opts snapshotOptions) []string {
 	return []string{
-		"api", "graphql",
+		"api", "graphql", "-i",
 		"-f", "query=" + snapshotQuery,
 		"-f", "owner=" + opts.owner,
 		"-f", "name=" + opts.name,
@@ -180,6 +187,7 @@ func handleSnapshot(cfg *config.Config, args []string) {
 		fmt.Println("Usage: ghx snapshot -R owner/name [--limit N] [--fresh]")
 		fmt.Println("  --limit N   open PRs to return, 1..100 (default 100)")
 		fmt.Println("  --fresh     bypass the shared window; authority decisions only")
+		fmt.Println("  --allow-stale  accept a cached body the gate marked stale (exit 3 otherwise)")
 		fmt.Println()
 		fmt.Println("One batched GraphQL read of a repo: default branch head, open PRs,")
 		fmt.Println("each head's checks. Shared through the gate window; --fresh is for")
@@ -202,15 +210,70 @@ func handleSnapshot(cfg *config.Config, args []string) {
 	}
 	cmd := exec.Command(cfg.GHPath, snapshotGHArgs(opts)...)
 	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
+	out, err := cmd.Output()
 	code := 0
-	if err := cmd.Run(); err != nil {
+	if err != nil {
 		code = 1
 		if e, ok := err.(*exec.ExitError); ok {
 			code = e.ExitCode()
 		}
 	}
+	header, body, split := splitGHResponse(out)
+	if !split {
+		os.Stdout.Write(out)
+	} else {
+		os.Stdout.Write(body)
+		if code == 0 {
+			code = staleExit(header, opts.allowStale)
+		}
+	}
 	logCall([]string{"snapshot", opts.owner + "/" + opts.name}, false, code)
 	os.Exit(code)
+}
+
+// splitGHResponse separates the status line and headers that `gh api -i`
+// prints from the JSON body. The blank line ends the header block.
+func splitGHResponse(raw []byte) (map[string]string, []byte, bool) {
+	sep := []byte("\r\n\r\n")
+	idx := bytes.Index(raw, sep)
+	skip := len(sep)
+	if idx < 0 {
+		sep = []byte("\n\n")
+		idx = bytes.Index(raw, sep)
+		skip = len(sep)
+	}
+	if idx < 0 {
+		return nil, raw, false
+	}
+	header := map[string]string{}
+	for _, line := range strings.Split(string(raw[:idx]), "\n") {
+		line = strings.TrimRight(line, "\r")
+		name, value, ok := strings.Cut(line, ":")
+		if !ok {
+			continue
+		}
+		header[strings.ToLower(strings.TrimSpace(name))] = strings.TrimSpace(value)
+	}
+	return header, raw[idx+skip:], true
+}
+
+// staleExit refuses to let a planning read pass as current when the gate
+// answered from a cached body it marked stale. The body stays untouched on
+// stdout; the refusal is the exit code, so a controller cannot schedule work
+// off an outage without noticing.
+func staleExit(header map[string]string, allowStale bool) int {
+	if header["x-ghgate-stale"] != "true" {
+		return 0
+	}
+	age := header["age"]
+	if age == "" {
+		age = "unknown"
+	}
+	if allowStale {
+		fmt.Fprintf(os.Stderr, "ghx snapshot: WARNING stale response served from cache (age %ss); --allow-stale given, continuing\n", age)
+		return 0
+	}
+	fmt.Fprintf(os.Stderr, "ghx snapshot: refusing a stale response (age %ss): the gate could not reach GitHub. Re-run, or pass --allow-stale to accept it.\n", age)
+	return 3
 }
