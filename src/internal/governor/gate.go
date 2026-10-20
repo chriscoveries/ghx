@@ -2,7 +2,6 @@ package governor
 
 import (
 	"bytes"
-	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"github.com/vektah/gqlparser/v2/ast"
@@ -33,6 +32,7 @@ type Policy struct {
 type Rate struct {
 	Remaining      int
 	Reset, Blocked int64
+	Failures       int64
 }
 type State struct {
 	Rates     map[string]Rate
@@ -175,13 +175,7 @@ func (g *Gate) RoundTrip(r *http.Request, c Caller) (result *http.Response) {
 		}
 		r.Body = io.NopCloser(bytes.NewReader(body))
 	}
-	if r.URL.Path == "/rate_limit" && r.Method == "GET" {
-		resp, err := g.Transport.RoundTrip(r)
-		if err != nil {
-			return failure(503, "upstream unavailable")
-		}
-		return resp
-	}
+
 	kind := operation(body)
 	read := r.Method == "GET" || r.Method == "HEAD" || (r.URL.Path == "/graphql" && kind == ast.Query)
 	nonessential := read || (r.URL.Path == "/graphql" && kind != ast.Mutation)
@@ -196,12 +190,10 @@ func (g *Gate) RoundTrip(r *http.Request, c Caller) (result *http.Response) {
 	}
 	id := cls.Identity + "/" + category
 	rate := g.State.Rates[id]
-	headers, _ := json.Marshal(r.Header)
-	rawKey := r.URL.String() + "\x00" + string(headers) + "\x00" + string(body)
-	key := fmt.Sprintf("%x", sha256.Sum256([]byte(rawKey)))
+	key := readKey(r, body)
 	path := filepath.Join(g.Dir, "rest", key+".json")
 	var e Entry
-	cacheable := r.Method == "GET" && r.Header.Get("Range") == ""
+	cacheable := (r.Method == "GET" || (r.URL.Path == "/graphql" && kind == ast.Query)) && r.Header.Get("Range") == "" && !directive(r.Header, "no-store")
 	if cacheable {
 		if b, err := os.ReadFile(path); err == nil {
 			json.Unmarshal(b, &e)
@@ -231,6 +223,16 @@ func (g *Gate) RoundTrip(r *http.Request, c Caller) (result *http.Response) {
 	} else if nonessential && !essential && rate.Reset > now && rate.Remaining < floor {
 		reason = "budget floor until " + time.Unix(rate.Reset, 0).UTC().Format(time.RFC3339)
 	}
+	// The gate is the one serialized cache for the whole box. An ordinary
+	// fresh hit consumes no caller/upstream budget. Explicit no-cache reads
+	// always revalidate and cannot use this path for authority decisions.
+	if reason == "" && cacheable && freshEntry(r, e, now) {
+		g.State.Counts["hit"]++
+		h := e.Header.Clone()
+		h.Set("Age", strconv.FormatInt(now-e.At, 10))
+		h.Set("X-Ghgate-Cache", "hit")
+		return &http.Response{StatusCode: 200, Header: h, Body: io.NopCloser(bytes.NewReader(e.Body)), ContentLength: int64(len(e.Body))}
+	}
 	caller := c.Lane
 	if caller == "" {
 		caller = c.Cwd
@@ -251,6 +253,7 @@ func (g *Gate) RoundTrip(r *http.Request, c Caller) (result *http.Response) {
 	if nonessential && !essential && len(kept) >= cls.Hourly {
 		reason = "caller hourly budget exceeded; inspect ghx xcache stats"
 	}
+
 	if reason != "" {
 		g.State.Counts["refused"]++
 		if v := stale(reason); read && v != nil {
@@ -270,8 +273,10 @@ func (g *Gate) RoundTrip(r *http.Request, c Caller) (result *http.Response) {
 			defer g.Invalidate()
 		}
 	}
-	if cacheable && e.Header.Get("ETag") != "" {
+	if r.Method == "GET" && cacheable && e.Header.Get("ETag") != "" {
 		r.Header.Set("If-None-Match", e.Header.Get("ETag"))
+	} else if r.Method == "GET" && cacheable && e.Header.Get("Last-Modified") != "" {
+		r.Header.Set("If-Modified-Since", e.Header.Get("Last-Modified"))
 	}
 	g.State.Calls[caller] = append(kept, now)
 	g.State.Calls["box"] = append(boxCalls, now)
@@ -305,45 +310,46 @@ func (g *Gate) RoundTrip(r *http.Request, c Caller) (result *http.Response) {
 			id = cls.Identity + "/" + observed
 			rate = g.State.Rates[id]
 		}
-		limited := false
-		if resp.StatusCode == 403 || resp.StatusCode == 429 {
-			b, err := io.ReadAll(io.LimitReader(resp.Body, 65536))
-			resp.Body.Close()
-			if err != nil {
-				return failure(503, "upstream body unavailable")
-			}
-			resp.Body = io.NopCloser(bytes.NewReader(b))
-			resp.ContentLength = int64(len(b))
-			lower := strings.ToLower(string(b))
-			limited = strings.Contains(lower, "rate limit") || strings.Contains(lower, "secondary rate")
-		}
 		if remaining, err := strconv.Atoi(resp.Header.Get("X-RateLimit-Remaining")); err == nil {
 			rate.Remaining = remaining
 		}
 		if reset, err := strconv.ParseInt(resp.Header.Get("X-RateLimit-Reset"), 10, 64); err == nil {
 			rate.Reset = reset
 		}
-		if resp.Header.Get("X-RateLimit-Remaining") == "0" || ((resp.StatusCode == 403 || resp.StatusCode == 429) && (resp.Header.Get("Retry-After") != "" || limited)) {
-			rate.Blocked = rate.Reset
-			if rate.Blocked <= now {
-				rate.Blocked = now + 3600
+		if resp.StatusCode == 403 || resp.StatusCode == 429 {
+			if rate.Failures < 32 {
+				rate.Failures++
 			}
-			if retry, err := strconv.ParseInt(resp.Header.Get("Retry-After"), 10, 64); err == nil && now+retry > rate.Blocked {
-				rate.Blocked = now + retry
+			rate.Blocked = blockedUntil(resp.Header, now, rate.Failures)
+			g.State.Counts["backoff"]++
+		} else if resp.StatusCode >= 200 && resp.StatusCode < 400 {
+			rate.Failures = 0
+			rate.Blocked = 0
+			if resp.Header.Get("X-RateLimit-Remaining") == "0" {
+				rate.Blocked = blockedUntil(resp.Header, now, 1)
 			}
 		}
 		g.State.Rates[id] = rate
 	}
+	if resp.StatusCode == 304 && e.At <= 0 && r.Header.Get("If-None-Match") == "" && r.Header.Get("If-Modified-Since") == "" {
+		resp.Body.Close()
+		return failure(503, "304 without a cached representation")
+	}
 	if resp.StatusCode == 304 && e.At > 0 {
 		resp.Body.Close()
 		e.At = now
-		save(path, e)
+		for name, values := range resp.Header {
+			e.Header[name] = values
+		}
+		if err := save(path, e); err != nil {
+			return failure(503, "cache save failed")
+		}
 		g.State.Counts["304"]++
 		g.State.Calls[caller] = g.State.Calls[caller][:len(g.State.Calls[caller])-1]
 		g.State.Calls["box"] = g.State.Calls["box"][:len(g.State.Calls["box"])-1]
 		resp = &http.Response{StatusCode: 200, Header: e.Header.Clone(), Body: io.NopCloser(bytes.NewReader(e.Body)), ContentLength: int64(len(e.Body))}
 	}
-	if rate.Blocked > now && read {
+	if rate.Blocked > now && read && resp.StatusCode != 403 && resp.StatusCode != 429 {
 		resp.Body.Close()
 		if v := stale("blocked"); v != nil {
 			resp = v
@@ -351,28 +357,21 @@ func (g *Gate) RoundTrip(r *http.Request, c Caller) (result *http.Response) {
 			resp = failure(403, "blocked until "+time.Unix(rate.Blocked, 0).UTC().Format(time.RFC3339))
 		}
 	}
-	if cacheable && resp.StatusCode == 200 && resp.Header.Get("X-Ghgate-Stale") == "" && resp.Header.Get("ETag") != "" {
-		b, err := io.ReadAll(io.LimitReader(resp.Body, 512*1024+1))
+	if cacheable && resp.StatusCode == 200 && resp.Header.Get("X-Ghgate-Stale") == "" {
+		b, err := io.ReadAll(io.LimitReader(resp.Body, 8*1024*1024+1))
 		if err != nil {
 			resp.Body.Close()
 			return failure(503, "upstream body unavailable")
 		}
-		if len(b) <= 512*1024 {
+		if len(b) <= 8*1024*1024 {
 			resp.Body.Close()
 			resp.Body = io.NopCloser(bytes.NewReader(b))
 			resp.ContentLength = int64(len(b))
 			if !strings.Contains(resp.Header.Get("Cache-Control"), "no-store") && resp.Header.Get("Vary") != "*" {
-				files, _ := filepath.Glob(filepath.Join(g.Dir, "rest", "*.json"))
-				if len(files) >= 128 {
-					for _, p := range files {
-						if p != path {
-							os.Remove(p)
-							break
-						}
+				if r.URL.Path != "/graphql" || cacheableQueryBody(b) {
+					if err = g.storeEntry(path, Entry{now, resp.Header.Clone(), b}); err != nil {
+						return failure(503, "cache save failed")
 					}
-				}
-				if err = save(path, Entry{now, resp.Header.Clone(), b}); err != nil {
-					return failure(503, "cache save failed")
 				}
 			}
 		} else {

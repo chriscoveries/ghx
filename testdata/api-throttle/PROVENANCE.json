@@ -1,0 +1,15 @@
+{
+  "endpoint": "GET /repos/chriscoveries/cifast/issues/140",
+  "utc": "2026-10-20T05:24:51.880839+00:00",
+  "host": "firestar",
+  "via": "GH_CALLER=lab-sol-b ghx api --include",
+  "sha256": "5a45b98800cc11ee25210f1d8d0a7b2699eb3403034e2b68f295648dcbb69b28",
+  "tokens_or_jit_material": "none in retained response",
+  "conditional_utc": "2026-10-20T05:27:57.803514+00:00",
+  "conditional_etag": "W/\"6329ed53d22e2529639603a464d9395ad859fc88b4ec0d6adb12335fba5bb5ce\"",
+  "conditional_exit": 1,
+  "files": {
+    "issue140-conditional.http": "c4534bfdda0147cd87d4c47fe779172d4171b7754845e5bb3c6c1d8bfff0797e",
+    "issue140.http": "5a45b98800cc11ee25210f1d8d0a7b2699eb3403034e2b68f295648dcbb69b28"
+  }
+}

@@ -30,7 +30,7 @@ func DefaultConfig() *Config {
 	return &Config{
 		ResourceViews:   true,
 		ImmutableTTL:    24 * time.Hour,
-		TTL:             30 * time.Second,
+		TTL:             5 * time.Minute,
 		TTLOverrides:    make(map[string]time.Duration),
 		MaxCacheEntries: 1000,
 		MaxCacheBytes:   64 << 20,
@@ -80,8 +80,15 @@ func Load() (*Config, error) {
 
 // CommandTTL returns the TTL for a specific command, falling back to default.
 func (c *Config) CommandTTL(cmd string) time.Duration {
+	ttl := c.TTL
 	if ttl, ok := c.TTLOverrides[cmd]; ok {
+		if ttl < 5*time.Minute {
+			return 5 * time.Minute
+		}
 		return ttl
 	}
-	return c.TTL
+	if ttl < 5*time.Minute {
+		return 5 * time.Minute
+	}
+	return ttl
 }
