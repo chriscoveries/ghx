@@ -37,7 +37,7 @@ func runGate(args []string) {
 		os.Exit(1)
 	}
 	defer ln.Close()
-	json.NewEncoder(os.Stdout).Encode(map[string]any{"gate": "ready", "box_hourly": g.Policy.BoxHourly})
+	json.NewEncoder(os.Stdout).Encode(map[string]any{"gate": "ready", "floor": g.Policy.Floor, "status_ttl": g.Policy.StatusTTL})
 	ch := make(chan os.Signal, 1)
 	signal.Notify(ch, os.Interrupt, syscall.SIGTERM)
 	defer signal.Stop(ch)

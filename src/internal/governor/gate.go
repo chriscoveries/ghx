@@ -18,12 +18,13 @@ import (
 
 type Class struct {
 	Identity string
-	Hourly   int
 }
 type Policy struct {
-	BoxHourly int
+	// Floor is the only refusal for reads: stop when GitHub reports fewer than
+	// this many calls remaining on the identity. There is no box or caller cap;
+	// Classes/Callers only choose the credential and attribute the call.
 	Floor     int
-	PerMinute int
+	StatusTTL int64
 	Classes   map[string]Class
 	Tokens    map[string]string
 	Callers   map[string]Class
@@ -61,7 +62,7 @@ type Gate struct {
 }
 
 func New(dir string) (*Gate, error) {
-	g := &Gate{Dir: dir, Policy: Policy{Floor: 500, PerMinute: 3, Classes: map[string]Class{"owner": {Identity: "owner", Hourly: 150}, "automation": {Identity: "owner", Hourly: 150}}, Tokens: map[string]string{}}, State: State{Rates: map[string]Rate{}, Calls: map[string][]int64{}, Counts: map[string]int64{}}, Transport: &http.Transport{Proxy: nil, ResponseHeaderTimeout: 30 * time.Second}, Now: time.Now}
+	g := &Gate{Dir: dir, Policy: Policy{Floor: 500, StatusTTL: 120, Classes: map[string]Class{"owner": {Identity: "owner"}, "automation": {Identity: "owner"}}, Tokens: map[string]string{}}, State: State{Rates: map[string]Rate{}, Calls: map[string][]int64{}, Counts: map[string]int64{}}, Transport: &http.Transport{Proxy: nil, ResponseHeaderTimeout: 30 * time.Second}, Now: time.Now}
 	if err := os.MkdirAll(filepath.Join(dir, "rest"), 0700); err != nil {
 		return nil, err
 	}
@@ -75,8 +76,11 @@ func New(dir string) (*Gate, error) {
 			return nil, err
 		}
 	}
-	if g.Policy.Floor < 500 || g.Policy.PerMinute < 1 {
-		return nil, fmt.Errorf("floor must be >=500 and PerMinute positive")
+	if g.Policy.Floor < 500 {
+		return nil, fmt.Errorf("floor must be >= 500")
+	}
+	if g.Policy.StatusTTL <= 0 {
+		g.Policy.StatusTTL = 120
 	}
 	return g, nil
 }
@@ -137,6 +141,39 @@ func failure(code int, msg string) *http.Response {
 	return &http.Response{StatusCode: code, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(bytes.NewReader(b)), ContentLength: int64(len(b))}
 }
 
+// HitRate is the share of reads answered from the shared cache without an
+// upstream call. Every upstream attempt counts, including 304 revalidations,
+// because both spend GitHub calls.
+func (g *Gate) HitRate() float64 {
+	hit, upstream := g.State.Counts["hit"], g.State.Counts["upstream"]
+	if total := hit + upstream; total > 0 {
+		return float64(hit) / float64(total)
+	}
+	return 0
+}
+
+// HourCalls reports the last hour's calls per caller. Attribution and
+// reporting only: no count here refuses a call.
+func (g *Gate) HourCalls() map[string]int64 {
+	out := map[string]int64{}
+	after := g.Now().Unix() - 3600
+	for key, calls := range g.State.Calls {
+		if strings.HasPrefix(key, "read:") {
+			continue
+		}
+		var count int64
+		for _, at := range calls {
+			if at > after {
+				count++
+			}
+		}
+		if count > 0 {
+			out[key] = count
+		}
+	}
+	return out
+}
+
 func operation(b []byte) ast.Operation {
 	var q struct {
 		Query         string
@@ -179,8 +216,8 @@ func (g *Gate) RoundTrip(r *http.Request, c Caller) (result *http.Response) {
 	if !ok {
 		return failure(403, "unknown caller class")
 	}
-	if cls.Hourly <= 0 {
-		return failure(403, "caller budget not configured")
+	if cls.Identity == "" {
+		return failure(403, "caller identity not configured")
 	}
 	r = r.Clone(r.Context())
 	r.RequestURI = ""
@@ -259,7 +296,7 @@ func (g *Gate) RoundTrip(r *http.Request, c Caller) (result *http.Response) {
 	// The gate is the one serialized cache for the whole box. An ordinary
 	// fresh hit consumes no caller/upstream budget. Explicit no-cache reads
 	// always revalidate and cannot use this path for authority decisions.
-	if reason == "" && cacheable && freshEntry(r, e, now) {
+	if reason == "" && cacheable && freshEntry(r, e, now, g.readTTL(r)) {
 		g.State.Counts["hit"]++
 		_ = os.Chtimes(path, g.Now(), g.Now())
 		h := e.Header.Clone()
@@ -267,26 +304,12 @@ func (g *Gate) RoundTrip(r *http.Request, c Caller) (result *http.Response) {
 		h.Set("X-Ghgate-Cache", "hit")
 		return &http.Response{StatusCode: 200, Header: h, Body: io.NopCloser(bytes.NewReader(e.Body)), ContentLength: int64(len(e.Body))}
 	}
+	// Attribution only: the per-caller hour count is reported, never enforced.
 	caller := c.Lane
 	if caller == "" {
 		caller = c.Cwd
 	}
 	kept := g.keep(caller, now-3600)
-	repeatKey := "read:" + key
-	var repeated []int64
-	if read {
-		repeated = g.keep(repeatKey, now-60)
-	}
-	if read && !essential && len(repeated) >= g.Policy.PerMinute {
-		reason = "repeated read refused until " + time.Unix(repeated[0]+60, 0).UTC().Format(time.RFC3339)
-	}
-	boxCalls := g.keep("box", now-3600)
-	if g.Policy.BoxHourly > 0 && len(boxCalls) >= g.Policy.BoxHourly {
-		reason = "box hourly budget exceeded; inspect devmsg box health"
-	}
-	if nonessential && !essential && len(kept) >= cls.Hourly {
-		reason = "caller hourly budget exceeded; inspect ghx xcache stats"
-	}
 
 	if reason != "" && !freeMeasurement {
 		g.State.Counts["refused"]++
@@ -314,10 +337,6 @@ func (g *Gate) RoundTrip(r *http.Request, c Caller) (result *http.Response) {
 	}
 	if !freeMeasurement {
 		g.State.Calls[caller] = append(kept, now)
-		g.State.Calls["box"] = append(boxCalls, now)
-		if read {
-			g.State.Calls[repeatKey] = append(repeated, now)
-		}
 	}
 	for k, v := range g.State.Calls {
 		if strings.HasPrefix(k, "read:") && len(v) > 0 && v[len(v)-1] <= now-60 {
@@ -418,7 +437,6 @@ func (g *Gate) RoundTrip(r *http.Request, c Caller) (result *http.Response) {
 		}
 		g.State.Counts["304"]++
 		g.State.Calls[caller] = g.State.Calls[caller][:len(g.State.Calls[caller])-1]
-		g.State.Calls["box"] = g.State.Calls["box"][:len(g.State.Calls["box"])-1]
 		resp = &http.Response{StatusCode: 200, Header: e.Header.Clone(), Body: io.NopCloser(bytes.NewReader(e.Body)), ContentLength: int64(len(e.Body))}
 	}
 	// D1: the block gates FUTURE requests; the fresh response just received is
