@@ -1,0 +1,1485 @@
+2026-10-20T14:21:20Z
+Uptime:          5m 5s
+Total Requests:  26
+Cache Hits:      1 (5.3%)
+Cache Misses:    18
+Passthrough:     7
+Coalesced:       0
+Revalidated:     0 (304 responses)
+Cache Size:      125 / 1000 entries
+Cache Bytes:     1267823 / 67108864 bytes
+Cache Rejected:  0
+
+Top Commands:
+  pr comment               0 hits / 0 misses  (0.0%)
+  pr create                0 hits / 0 misses  (0.0%)
+  run list                 0 hits / 2 misses  (0.0%)
+  api get                  1 hits / 15 misses  (6.2%)
+  pr merge                 0 hits / 0 misses  (0.0%)
+  pr view                  0 hits / 1 misses  (0.0%)
+  api -X                   0 hits / 0 misses  (0.0%)
+  api graphql              0 hits / 0 misses  (0.0%)
+  api repos/chriscoveries/wick/issues/comments/6292973832 0 hits / 0 misses  (0.0%)
+2026-10-20T14:22:20Z
+Uptime:          6m 5s
+Total Requests:  29
+Cache Hits:      1 (4.5%)
+Cache Misses:    21
+Passthrough:     7
+Coalesced:       0
+Revalidated:     0 (304 responses)
+Cache Size:      128 / 1000 entries
+Cache Bytes:     1332655 / 67108864 bytes
+Cache Rejected:  0
+
+Top Commands:
+  api get                  1 hits / 16 misses  (5.9%)
+  pr comment               0 hits / 0 misses  (0.0%)
+  pr merge                 0 hits / 0 misses  (0.0%)
+  run list                 0 hits / 2 misses  (0.0%)
+  api -X                   0 hits / 0 misses  (0.0%)
+  api graphql              0 hits / 0 misses  (0.0%)
+  api repos/chriscoveries/wick/issues/comments/6292973832 0 hits / 0 misses  (0.0%)
+  issue view               0 hits / 1 misses  (0.0%)
+  pr create                0 hits / 0 misses  (0.0%)
+  pr view                  0 hits / 2 misses  (0.0%)
+2026-10-20T14:23:20Z
+Uptime:          7m 5s
+Total Requests:  34
+Cache Hits:      1 (3.8%)
+Cache Misses:    25
+Passthrough:     8
+Coalesced:       0
+Revalidated:     0 (304 responses)
+Cache Size:      131 / 1000 entries
+Cache Bytes:     1332764 / 67108864 bytes
+Cache Rejected:  0
+
+Top Commands:
+  api -X                   0 hits / 0 misses  (0.0%)
+  api get                  1 hits / 20 misses  (4.8%)
+  api repos/chriscoveries/wick/issues/comments/6292973832 0 hits / 0 misses  (0.0%)
+  pr comment               0 hits / 0 misses  (0.0%)
+  api graphql              0 hits / 0 misses  (0.0%)
+  issue view               0 hits / 1 misses  (0.0%)
+  pr create                0 hits / 0 misses  (0.0%)
+  pr merge                 0 hits / 0 misses  (0.0%)
+  pr view                  0 hits / 2 misses  (0.0%)
+  run list                 0 hits / 2 misses  (0.0%)
+2026-10-20T14:24:20Z
+Uptime:          8m 5s
+Total Requests:  38
+Cache Hits:      1 (3.3%)
+Cache Misses:    29
+Passthrough:     8
+Coalesced:       0
+Revalidated:     0 (304 responses)
+Cache Size:      134 / 1000 entries
+Cache Bytes:     1333040 / 67108864 bytes
+Cache Rejected:  0
+
+Top Commands:
+  api get                  1 hits / 24 misses  (4.0%)
+  api graphql              0 hits / 0 misses  (0.0%)
+  issue view               0 hits / 1 misses  (0.0%)
+  pr create                0 hits / 0 misses  (0.0%)
+  pr merge                 0 hits / 0 misses  (0.0%)
+  run list                 0 hits / 2 misses  (0.0%)
+  api repos/chriscoveries/wick/issues/comments/6292973832 0 hits / 0 misses  (0.0%)
+  pr comment               0 hits / 0 misses  (0.0%)
+  pr view                  0 hits / 2 misses  (0.0%)
+  api -X                   0 hits / 0 misses  (0.0%)
+2026-10-20T14:25:20Z
+Uptime:          9m 5s
+Total Requests:  41
+Cache Hits:      1 (3.1%)
+Cache Misses:    31
+Passthrough:     9
+Coalesced:       0
+Revalidated:     0 (304 responses)
+Cache Size:      133 / 1000 entries
+Cache Bytes:     1271550 / 67108864 bytes
+Cache Rejected:  0
+
+Top Commands:
+  api graphql              0 hits / 0 misses  (0.0%)
+  api repos/chriscoveries/wick/issues/comments/6292973832 0 hits / 0 misses  (0.0%)
+  pr comment               0 hits / 0 misses  (0.0%)
+  pr merge                 0 hits / 0 misses  (0.0%)
+  api -X                   0 hits / 0 misses  (0.0%)
+  api get                  1 hits / 26 misses  (3.7%)
+  issue view               0 hits / 1 misses  (0.0%)
+  pr create                0 hits / 0 misses  (0.0%)
+  pr view                  0 hits / 2 misses  (0.0%)
+  run list                 0 hits / 2 misses  (0.0%)
+2026-10-20T14:26:20Z
+Uptime:          10m 5s
+Total Requests:  47
+Cache Hits:      3 (8.1%)
+Cache Misses:    34
+Passthrough:     10
+Coalesced:       0
+Revalidated:     0 (304 responses)
+Cache Size:      136 / 1000 entries
+Cache Bytes:     1325039 / 67108864 bytes
+Cache Rejected:  0
+
+Top Commands:
+  api repos/chriscoveries/wick/issues/comments/6292973832 0 hits / 0 misses  (0.0%)
+  issue view               0 hits / 1 misses  (0.0%)
+  pr comment               0 hits / 0 misses  (0.0%)
+  pr create                0 hits / 0 misses  (0.0%)
+  pr view                  0 hits / 2 misses  (0.0%)
+  run list                 2 hits / 3 misses  (40.0%)
+  api -X                   0 hits / 0 misses  (0.0%)
+  api graphql              0 hits / 0 misses  (0.0%)
+  pr merge                 0 hits / 0 misses  (0.0%)
+  api get                  1 hits / 28 misses  (3.4%)
+2026-10-20T14:27:20Z
+Uptime:          11m 5s
+Total Requests:  47
+Cache Hits:      3 (8.1%)
+Cache Misses:    34
+Passthrough:     10
+Coalesced:       0
+Revalidated:     0 (304 responses)
+Cache Size:      136 / 1000 entries
+Cache Bytes:     1325039 / 67108864 bytes
+Cache Rejected:  0
+
+Top Commands:
+  pr comment               0 hits / 0 misses  (0.0%)
+  pr create                0 hits / 0 misses  (0.0%)
+  pr merge                 0 hits / 0 misses  (0.0%)
+  run list                 2 hits / 3 misses  (40.0%)
+  api get                  1 hits / 28 misses  (3.4%)
+  api graphql              0 hits / 0 misses  (0.0%)
+  pr view                  0 hits / 2 misses  (0.0%)
+  api -X                   0 hits / 0 misses  (0.0%)
+  api repos/chriscoveries/wick/issues/comments/6292973832 0 hits / 0 misses  (0.0%)
+  issue view               0 hits / 1 misses  (0.0%)
+2026-10-20T14:28:20Z
+Uptime:          12m 5s
+Total Requests:  51
+Cache Hits:      3 (7.5%)
+Cache Misses:    37
+Passthrough:     11
+Coalesced:       0
+Revalidated:     0 (304 responses)
+Cache Size:      129 / 1000 entries
+Cache Bytes:     1378809 / 67108864 bytes
+Cache Rejected:  0
+
+Top Commands:
+  api get                  1 hits / 30 misses  (3.2%)
+  api graphql              0 hits / 0 misses  (0.0%)
+  api repos/chriscoveries/wick/issues/comments/6292973832 0 hits / 0 misses  (0.0%)
+  issue view               0 hits / 1 misses  (0.0%)
+  pr comment               0 hits / 0 misses  (0.0%)
+  pr create                0 hits / 0 misses  (0.0%)
+  pr merge                 0 hits / 0 misses  (0.0%)
+  pr view                  0 hits / 2 misses  (0.0%)
+  api -X                   0 hits / 0 misses  (0.0%)
+  run list                 2 hits / 4 misses  (33.3%)
+2026-10-20T14:29:20Z
+Uptime:          13m 5s
+Total Requests:  55
+Cache Hits:      3 (7.0%)
+Cache Misses:    40
+Passthrough:     12
+Coalesced:       0
+Revalidated:     0 (304 responses)
+Cache Size:      132 / 1000 entries
+Cache Bytes:     1427621 / 67108864 bytes
+Cache Rejected:  0
+
+Top Commands:
+  api -X                   0 hits / 0 misses  (0.0%)
+  api get                  1 hits / 32 misses  (3.0%)
+  api repos/chriscoveries/wick/issues/comments/6292973832 0 hits / 0 misses  (0.0%)
+  pr merge                 0 hits / 0 misses  (0.0%)
+  pr view                  0 hits / 2 misses  (0.0%)
+  run list                 2 hits / 5 misses  (28.6%)
+  api graphql              0 hits / 0 misses  (0.0%)
+  issue view               0 hits / 1 misses  (0.0%)
+  pr comment               0 hits / 0 misses  (0.0%)
+  pr create                0 hits / 0 misses  (0.0%)
+2026-10-20T14:30:20Z
+Uptime:          14m 5s
+Total Requests:  55
+Cache Hits:      3 (7.0%)
+Cache Misses:    40
+Passthrough:     12
+Coalesced:       0
+Revalidated:     0 (304 responses)
+Cache Size:      132 / 1000 entries
+Cache Bytes:     1427621 / 67108864 bytes
+Cache Rejected:  0
+
+Top Commands:
+  api get                  1 hits / 32 misses  (3.0%)
+  api repos/chriscoveries/wick/issues/comments/6292973832 0 hits / 0 misses  (0.0%)
+  api graphql              0 hits / 0 misses  (0.0%)
+  issue view               0 hits / 1 misses  (0.0%)
+  pr comment               0 hits / 0 misses  (0.0%)
+  pr create                0 hits / 0 misses  (0.0%)
+  pr merge                 0 hits / 0 misses  (0.0%)
+  pr view                  0 hits / 2 misses  (0.0%)
+  run list                 2 hits / 5 misses  (28.6%)
+  api -X                   0 hits / 0 misses  (0.0%)
+2026-10-20T14:31:21Z
+Uptime:          15m 6s
+Total Requests:  57
+Cache Hits:      3 (6.7%)
+Cache Misses:    42
+Passthrough:     12
+Coalesced:       0
+Revalidated:     0 (304 responses)
+Cache Size:      134 / 1000 entries
+Cache Bytes:     1427895 / 67108864 bytes
+Cache Rejected:  0
+
+Top Commands:
+  pr merge                 0 hits / 0 misses  (0.0%)
+  run list                 2 hits / 5 misses  (28.6%)
+  api graphql              0 hits / 0 misses  (0.0%)
+  issue view               0 hits / 1 misses  (0.0%)
+  pr create                0 hits / 0 misses  (0.0%)
+  pr view                  0 hits / 2 misses  (0.0%)
+  api -X                   0 hits / 0 misses  (0.0%)
+  api get                  1 hits / 34 misses  (2.9%)
+  api repos/chriscoveries/wick/issues/comments/6292973832 0 hits / 0 misses  (0.0%)
+  pr comment               0 hits / 0 misses  (0.0%)
+2026-10-20T14:32:21Z
+Uptime:          16m 6s
+Total Requests:  66
+Cache Hits:      4 (7.5%)
+Cache Misses:    49
+Passthrough:     13
+Coalesced:       0
+Revalidated:     0 (304 responses)
+Cache Size:      138 / 1000 entries
+Cache Bytes:     1549903 / 67108864 bytes
+Cache Rejected:  0
+
+Top Commands:
+  pr comment               0 hits / 0 misses  (0.0%)
+  pr view                  0 hits / 7 misses  (0.0%)
+  run list                 3 hits / 6 misses  (33.3%)
+  pr create                0 hits / 0 misses  (0.0%)
+  pr merge                 0 hits / 0 misses  (0.0%)
+  api -X                   0 hits / 0 misses  (0.0%)
+  api get                  1 hits / 34 misses  (2.9%)
+  api graphql              0 hits / 0 misses  (0.0%)
+  api repos/chriscoveries/wick/issues/comments/6292973832 0 hits / 0 misses  (0.0%)
+  issue view               0 hits / 2 misses  (0.0%)
+2026-10-20T14:33:21Z
+Uptime:          17m 6s
+Total Requests:  71
+Cache Hits:      6 (10.5%)
+Cache Misses:    51
+Passthrough:     14
+Coalesced:       0
+Revalidated:     0 (304 responses)
+Cache Size:      137 / 1000 entries
+Cache Bytes:     1554844 / 67108864 bytes
+Cache Rejected:  0
+
+Top Commands:
+  api get                  1 hits / 35 misses  (2.8%)
+  api graphql              0 hits / 0 misses  (0.0%)
+  issue view               1 hits / 3 misses  (25.0%)
+  pr comment               0 hits / 0 misses  (0.0%)
+  pr merge                 0 hits / 0 misses  (0.0%)
+  pr view                  1 hits / 7 misses  (12.5%)
+  run list                 3 hits / 6 misses  (33.3%)
+  api repos/chriscoveries/wick/issues/comments/6292973832 0 hits / 0 misses  (0.0%)
+  pr create                0 hits / 0 misses  (0.0%)
+  api -X                   0 hits / 0 misses  (0.0%)
+2026-10-20T14:34:21Z
+Uptime:          18m 6s
+Total Requests:  80
+Cache Hits:      7 (10.6%)
+Cache Misses:    59
+Passthrough:     14
+Coalesced:       0
+Revalidated:     0 (304 responses)
+Cache Size:      143 / 1000 entries
+Cache Bytes:     1855070 / 67108864 bytes
+Cache Rejected:  0
+
+Top Commands:
+  api repos/chriscoveries/wick/issues/comments/6292973832 0 hits / 0 misses  (0.0%)
+  issue view               1 hits / 3 misses  (25.0%)
+  pr merge                 0 hits / 0 misses  (0.0%)
+  run list                 4 hits / 8 misses  (33.3%)
+  api -X                   0 hits / 0 misses  (0.0%)
+  api get                  1 hits / 41 misses  (2.4%)
+  api graphql              0 hits / 0 misses  (0.0%)
+  pr comment               0 hits / 0 misses  (0.0%)
+  pr create                0 hits / 0 misses  (0.0%)
+  pr view                  1 hits / 7 misses  (12.5%)
+2026-10-20T14:35:21Z
+Uptime:          19m 6s
+Total Requests:  94
+Cache Hits:      8 (11.1%)
+Cache Misses:    64
+Passthrough:     22
+Coalesced:       0
+Revalidated:     0 (304 responses)
+Cache Size:      8 / 1000 entries
+Cache Bytes:     23836 / 67108864 bytes
+Cache Rejected:  0
+
+Top Commands:
+  api -X                   0 hits / 0 misses  (0.0%)
+  api get                  2 hits / 46 misses  (4.2%)
+  api repos/chriscoveries/wick/issues/comments/6292973832 0 hits / 0 misses  (0.0%)
+  issue view               1 hits / 3 misses  (25.0%)
+  pr merge                 0 hits / 0 misses  (0.0%)
+  pr view                  1 hits / 7 misses  (12.5%)
+  run list                 4 hits / 8 misses  (33.3%)
+  api graphql              0 hits / 0 misses  (0.0%)
+  pr comment               0 hits / 0 misses  (0.0%)
+  pr create                0 hits / 0 misses  (0.0%)
+2026-10-20T14:36:21Z
+Uptime:          20m 6s
+Total Requests:  120
+Cache Hits:      8 (8.2%)
+Cache Misses:    90
+Passthrough:     22
+Coalesced:       0
+Revalidated:     0 (304 responses)
+Cache Size:      31 / 1000 entries
+Cache Bytes:     38282 / 67108864 bytes
+Cache Rejected:  0
+
+Top Commands:
+  api -X                   0 hits / 0 misses  (0.0%)
+  api repos/chriscoveries/wick/issues/comments/6292973832 0 hits / 0 misses  (0.0%)
+  pr comment               0 hits / 0 misses  (0.0%)
+  pr create                0 hits / 0 misses  (0.0%)
+  pr merge                 0 hits / 0 misses  (0.0%)
+  run list                 4 hits / 8 misses  (33.3%)
+  api get                  2 hits / 72 misses  (2.7%)
+  api graphql              0 hits / 0 misses  (0.0%)
+  issue view               1 hits / 3 misses  (25.0%)
+  pr view                  1 hits / 7 misses  (12.5%)
+2026-10-20T14:37:21Z
+Uptime:          21m 6s
+Total Requests:  123
+Cache Hits:      8 (7.9%)
+Cache Misses:    93
+Passthrough:     22
+Coalesced:       0
+Revalidated:     0 (304 responses)
+Cache Size:      32 / 1000 entries
+Cache Bytes:     38298 / 67108864 bytes
+Cache Rejected:  0
+
+Top Commands:
+  api get                  2 hits / 75 misses  (2.6%)
+  api graphql              0 hits / 0 misses  (0.0%)
+  api repos/chriscoveries/wick/issues/comments/6292973832 0 hits / 0 misses  (0.0%)
+  pr comment               0 hits / 0 misses  (0.0%)
+  pr merge                 0 hits / 0 misses  (0.0%)
+  run list                 4 hits / 8 misses  (33.3%)
+  api -X                   0 hits / 0 misses  (0.0%)
+  issue view               1 hits / 3 misses  (25.0%)
+  pr create                0 hits / 0 misses  (0.0%)
+  pr view                  1 hits / 7 misses  (12.5%)
+2026-10-20T14:38:21Z
+Uptime:          22m 6s
+Total Requests:  132
+Cache Hits:      8 (7.4%)
+Cache Misses:    100
+Passthrough:     24
+Coalesced:       0
+Revalidated:     0 (304 responses)
+Cache Size:      34 / 1000 entries
+Cache Bytes:     45308 / 67108864 bytes
+Cache Rejected:  0
+
+Top Commands:
+  api -X                   0 hits / 0 misses  (0.0%)
+  api graphql              0 hits / 0 misses  (0.0%)
+  api repos/chriscoveries/wick/issues/comments/6292973832 0 hits / 0 misses  (0.0%)
+  pr comment               0 hits / 0 misses  (0.0%)
+  pr merge                 0 hits / 0 misses  (0.0%)
+  pr view                  1 hits / 7 misses  (12.5%)
+  api get                  2 hits / 82 misses  (2.4%)
+  issue view               1 hits / 3 misses  (25.0%)
+  pr create                0 hits / 0 misses  (0.0%)
+  run list                 4 hits / 8 misses  (33.3%)
+2026-10-20T14:39:21Z
+Uptime:          23m 6s
+Total Requests:  143
+Cache Hits:      9 (7.6%)
+Cache Misses:    110
+Passthrough:     24
+Coalesced:       0
+Revalidated:     0 (304 responses)
+Cache Size:      44 / 1000 entries
+Cache Bytes:     183322 / 67108864 bytes
+Cache Rejected:  0
+
+Top Commands:
+  api -X                   0 hits / 0 misses  (0.0%)
+  api get                  3 hits / 91 misses  (3.2%)
+  api graphql              0 hits / 0 misses  (0.0%)
+  issue view               1 hits / 3 misses  (25.0%)
+  api repos/chriscoveries/wick/issues/comments/6292973832 0 hits / 0 misses  (0.0%)
+  pr comment               0 hits / 0 misses  (0.0%)
+  pr create                0 hits / 0 misses  (0.0%)
+  pr merge                 0 hits / 0 misses  (0.0%)
+  pr view                  1 hits / 7 misses  (12.5%)
+  run list                 4 hits / 9 misses  (30.8%)
+2026-10-20T14:40:21Z
+Uptime:          24m 6s
+Total Requests:  145
+Cache Hits:      9 (7.4%)
+Cache Misses:    112
+Passthrough:     24
+Coalesced:       0
+Revalidated:     0 (304 responses)
+Cache Size:      46 / 1000 entries
+Cache Bytes:     231848 / 67108864 bytes
+Cache Rejected:  0
+
+Top Commands:
+  api -X                   0 hits / 0 misses  (0.0%)
+  api get                  3 hits / 92 misses  (3.2%)
+  api graphql              0 hits / 0 misses  (0.0%)
+  api repos/chriscoveries/wick/issues/comments/6292973832 0 hits / 0 misses  (0.0%)
+  issue view               1 hits / 3 misses  (25.0%)
+  pr merge                 0 hits / 0 misses  (0.0%)
+  pr view                  1 hits / 7 misses  (12.5%)
+  run list                 4 hits / 10 misses  (28.6%)
+  pr comment               0 hits / 0 misses  (0.0%)
+  pr create                0 hits / 0 misses  (0.0%)
+2026-10-20T14:41:21Z
+Uptime:          25m 6s
+Total Requests:  147
+Cache Hits:      9 (7.4%)
+Cache Misses:    113
+Passthrough:     25
+Coalesced:       0
+Revalidated:     0 (304 responses)
+Cache Size:      47 / 1000 entries
+Cache Bytes:     231959 / 67108864 bytes
+Cache Rejected:  0
+
+Top Commands:
+  run list                 4 hits / 10 misses  (28.6%)
+  api graphql              0 hits / 0 misses  (0.0%)
+  issue view               1 hits / 3 misses  (25.0%)
+  pr comment               0 hits / 0 misses  (0.0%)
+  pr merge                 0 hits / 0 misses  (0.0%)
+  pr view                  1 hits / 7 misses  (12.5%)
+  api -X                   0 hits / 0 misses  (0.0%)
+  api get                  3 hits / 93 misses  (3.1%)
+  api repos/chriscoveries/wick/issues/comments/6292973832 0 hits / 0 misses  (0.0%)
+  pr create                0 hits / 0 misses  (0.0%)
+2026-10-20T14:42:22Z
+Uptime:          26m 6s
+Total Requests:  149
+Cache Hits:      9 (7.3%)
+Cache Misses:    115
+Passthrough:     25
+Coalesced:       0
+Revalidated:     0 (304 responses)
+Cache Size:      49 / 1000 entries
+Cache Bytes:     232267 / 67108864 bytes
+Cache Rejected:  0
+
+Top Commands:
+  api -X                   0 hits / 0 misses  (0.0%)
+  issue view               1 hits / 3 misses  (25.0%)
+  pr comment               0 hits / 0 misses  (0.0%)
+  pr merge                 0 hits / 0 misses  (0.0%)
+  pr view                  1 hits / 7 misses  (12.5%)
+  run list                 4 hits / 10 misses  (28.6%)
+  api get                  3 hits / 95 misses  (3.1%)
+  api graphql              0 hits / 0 misses  (0.0%)
+  api repos/chriscoveries/wick/issues/comments/6292973832 0 hits / 0 misses  (0.0%)
+  pr create                0 hits / 0 misses  (0.0%)
+2026-10-20T14:43:22Z
+Uptime:          27m 7s
+Total Requests:  151
+Cache Hits:      9 (7.1%)
+Cache Misses:    117
+Passthrough:     25
+Coalesced:       0
+Revalidated:     0 (304 responses)
+Cache Size:      51 / 1000 entries
+Cache Bytes:     232282 / 67108864 bytes
+Cache Rejected:  0
+
+Top Commands:
+  api -X                   0 hits / 0 misses  (0.0%)
+  api get                  3 hits / 97 misses  (3.0%)
+  api repos/chriscoveries/wick/issues/comments/6292973832 0 hits / 0 misses  (0.0%)
+  issue view               1 hits / 3 misses  (25.0%)
+  pr comment               0 hits / 0 misses  (0.0%)
+  pr create                0 hits / 0 misses  (0.0%)
+  pr merge                 0 hits / 0 misses  (0.0%)
+  api graphql              0 hits / 0 misses  (0.0%)
+  pr view                  1 hits / 7 misses  (12.5%)
+  run list                 4 hits / 10 misses  (28.6%)
+2026-10-20T14:44:22Z
+Uptime:          28m 7s
+Total Requests:  162
+Cache Hits:      9 (6.7%)
+Cache Misses:    125
+Passthrough:     28
+Coalesced:       0
+Revalidated:     0 (304 responses)
+Cache Size:      53 / 1000 entries
+Cache Bytes:     308915 / 67108864 bytes
+Cache Rejected:  0
+
+Top Commands:
+  api graphql              0 hits / 0 misses  (0.0%)
+  pr comment               0 hits / 0 misses  (0.0%)
+  pr merge                 0 hits / 0 misses  (0.0%)
+  run list                 4 hits / 10 misses  (28.6%)
+  api -X                   0 hits / 0 misses  (0.0%)
+  api get                  3 hits / 104 misses  (2.8%)
+  api repos/chriscoveries/wick/issues/comments/6292973832 0 hits / 0 misses  (0.0%)
+  issue view               1 hits / 3 misses  (25.0%)
+  pr create                0 hits / 0 misses  (0.0%)
+  pr edit                  0 hits / 0 misses  (0.0%)
+  pr view                  1 hits / 8 misses  (11.1%)
+2026-10-20T14:45:22Z
+Uptime:          29m 7s
+Total Requests:  167
+Cache Hits:      9 (6.5%)
+Cache Misses:    130
+Passthrough:     28
+Coalesced:       0
+Revalidated:     0 (304 responses)
+Cache Size:      58 / 1000 entries
+Cache Bytes:     347932 / 67108864 bytes
+Cache Rejected:  0
+
+Top Commands:
+  api repos/chriscoveries/wick/issues/comments/6292973832 0 hits / 0 misses  (0.0%)
+  pr comment               0 hits / 0 misses  (0.0%)
+  pr edit                  0 hits / 0 misses  (0.0%)
+  pr merge                 0 hits / 0 misses  (0.0%)
+  pr view                  1 hits / 8 misses  (11.1%)
+  api -X                   0 hits / 0 misses  (0.0%)
+  api get                  3 hits / 109 misses  (2.7%)
+  api graphql              0 hits / 0 misses  (0.0%)
+  issue view               1 hits / 3 misses  (25.0%)
+  pr create                0 hits / 0 misses  (0.0%)
+  run list                 4 hits / 10 misses  (28.6%)
+2026-10-20T14:46:22Z
+Uptime:          30m 7s
+Total Requests:  168
+Cache Hits:      9 (6.4%)
+Cache Misses:    131
+Passthrough:     28
+Coalesced:       0
+Revalidated:     0 (304 responses)
+Cache Size:      59 / 1000 entries
+Cache Bytes:     348232 / 67108864 bytes
+Cache Rejected:  0
+
+Top Commands:
+  pr comment               0 hits / 0 misses  (0.0%)
+  run list                 4 hits / 10 misses  (28.6%)
+  api get                  3 hits / 110 misses  (2.7%)
+  api repos/chriscoveries/wick/issues/comments/6292973832 0 hits / 0 misses  (0.0%)
+  issue view               1 hits / 3 misses  (25.0%)
+  pr create                0 hits / 0 misses  (0.0%)
+  pr edit                  0 hits / 0 misses  (0.0%)
+  pr merge                 0 hits / 0 misses  (0.0%)
+  pr view                  1 hits / 8 misses  (11.1%)
+  api -X                   0 hits / 0 misses  (0.0%)
+  api graphql              0 hits / 0 misses  (0.0%)
+2026-10-20T14:47:22Z
+Uptime:          31m 7s
+Total Requests:  169
+Cache Hits:      9 (6.4%)
+Cache Misses:    131
+Passthrough:     29
+Coalesced:       0
+Revalidated:     0 (304 responses)
+Cache Size:      59 / 1000 entries
+Cache Bytes:     348232 / 67108864 bytes
+Cache Rejected:  0
+
+Top Commands:
+  run list                 4 hits / 10 misses  (28.6%)
+  api -X                   0 hits / 0 misses  (0.0%)
+  api get                  3 hits / 110 misses  (2.7%)
+  api graphql              0 hits / 0 misses  (0.0%)
+  api repos/chriscoveries/wick/issues/comments/6292973832 0 hits / 0 misses  (0.0%)
+  issue view               1 hits / 3 misses  (25.0%)
+  pr view                  1 hits / 8 misses  (11.1%)
+  pr comment               0 hits / 0 misses  (0.0%)
+  pr create                0 hits / 0 misses  (0.0%)
+  pr edit                  0 hits / 0 misses  (0.0%)
+  pr merge                 0 hits / 0 misses  (0.0%)
+2026-10-20T14:48:22Z
+Uptime:          32m 7s
+Total Requests:  169
+Cache Hits:      9 (6.4%)
+Cache Misses:    131
+Passthrough:     29
+Coalesced:       0
+Revalidated:     0 (304 responses)
+Cache Size:      59 / 1000 entries
+Cache Bytes:     348232 / 67108864 bytes
+Cache Rejected:  0
+
+Top Commands:
+  issue view               1 hits / 3 misses  (25.0%)
+  pr create                0 hits / 0 misses  (0.0%)
+  pr merge                 0 hits / 0 misses  (0.0%)
+  pr view                  1 hits / 8 misses  (11.1%)
+  api -X                   0 hits / 0 misses  (0.0%)
+  api get                  3 hits / 110 misses  (2.7%)
+  api repos/chriscoveries/wick/issues/comments/6292973832 0 hits / 0 misses  (0.0%)
+  pr comment               0 hits / 0 misses  (0.0%)
+  pr edit                  0 hits / 0 misses  (0.0%)
+  run list                 4 hits / 10 misses  (28.6%)
+  api graphql              0 hits / 0 misses  (0.0%)
+2026-10-20T14:49:22Z
+Uptime:          33m 7s
+Total Requests:  171
+Cache Hits:      9 (6.3%)
+Cache Misses:    133
+Passthrough:     29
+Coalesced:       0
+Revalidated:     0 (304 responses)
+Cache Size:      61 / 1000 entries
+Cache Bytes:     348818 / 67108864 bytes
+Cache Rejected:  0
+
+Top Commands:
+  issue view               1 hits / 3 misses  (25.0%)
+  pr create                0 hits / 0 misses  (0.0%)
+  pr merge                 0 hits / 0 misses  (0.0%)
+  pr view                  1 hits / 8 misses  (11.1%)
+  api -X                   0 hits / 0 misses  (0.0%)
+  api get                  3 hits / 112 misses  (2.6%)
+  api graphql              0 hits / 0 misses  (0.0%)
+  pr comment               0 hits / 0 misses  (0.0%)
+  pr edit                  0 hits / 0 misses  (0.0%)
+  run list                 4 hits / 10 misses  (28.6%)
+  api repos/chriscoveries/wick/issues/comments/6292973832 0 hits / 0 misses  (0.0%)
+2026-10-20T14:50:22Z
+Uptime:          34m 7s
+Total Requests:  172
+Cache Hits:      9 (6.3%)
+Cache Misses:    133
+Passthrough:     30
+Coalesced:       0
+Revalidated:     0 (304 responses)
+Cache Size:      61 / 1000 entries
+Cache Bytes:     348818 / 67108864 bytes
+Cache Rejected:  0
+
+Top Commands:
+  pr edit                  0 hits / 0 misses  (0.0%)
+  pr view                  1 hits / 8 misses  (11.1%)
+  api get                  3 hits / 112 misses  (2.6%)
+  api repos/chriscoveries/wick/issues/comments/6292973832 0 hits / 0 misses  (0.0%)
+  pr create                0 hits / 0 misses  (0.0%)
+  pr merge                 0 hits / 0 misses  (0.0%)
+  run list                 4 hits / 10 misses  (28.6%)
+  api -X                   0 hits / 0 misses  (0.0%)
+  api graphql              0 hits / 0 misses  (0.0%)
+  issue view               1 hits / 3 misses  (25.0%)
+  pr comment               0 hits / 0 misses  (0.0%)
+2026-10-20T14:51:22Z
+Uptime:          35m 7s
+Total Requests:  174
+Cache Hits:      9 (6.2%)
+Cache Misses:    135
+Passthrough:     30
+Coalesced:       0
+Revalidated:     0 (304 responses)
+Cache Size:      61 / 1000 entries
+Cache Bytes:     294761 / 67108864 bytes
+Cache Rejected:  0
+
+Top Commands:
+  pr comment               0 hits / 0 misses  (0.0%)
+  pr create                0 hits / 0 misses  (0.0%)
+  pr edit                  0 hits / 0 misses  (0.0%)
+  pr merge                 0 hits / 0 misses  (0.0%)
+  pr view                  1 hits / 8 misses  (11.1%)
+  run list                 4 hits / 12 misses  (25.0%)
+  api -X                   0 hits / 0 misses  (0.0%)
+  api get                  3 hits / 112 misses  (2.6%)
+  api graphql              0 hits / 0 misses  (0.0%)
+  api repos/chriscoveries/wick/issues/comments/6292973832 0 hits / 0 misses  (0.0%)
+  issue view               1 hits / 3 misses  (25.0%)
+2026-10-20T14:52:23Z
+Uptime:          36m 7s
+Total Requests:  180
+Cache Hits:      10 (6.7%)
+Cache Misses:    140
+Passthrough:     30
+Coalesced:       0
+Revalidated:     0 (304 responses)
+Cache Size:      66 / 1000 entries
+Cache Bytes:     370463 / 67108864 bytes
+Cache Rejected:  0
+
+Top Commands:
+  run list                 4 hits / 12 misses  (25.0%)
+  api -X                   0 hits / 0 misses  (0.0%)
+  api repos/chriscoveries/wick/issues/comments/6292973832 0 hits / 0 misses  (0.0%)
+  pr comment               0 hits / 0 misses  (0.0%)
+  pr merge                 0 hits / 0 misses  (0.0%)
+  api get                  4 hits / 117 misses  (3.3%)
+  api graphql              0 hits / 0 misses  (0.0%)
+  issue view               1 hits / 3 misses  (25.0%)
+  pr create                0 hits / 0 misses  (0.0%)
+  pr edit                  0 hits / 0 misses  (0.0%)
+  pr view                  1 hits / 8 misses  (11.1%)
+2026-10-20T14:53:23Z
+Uptime:          37m 7s
+Total Requests:  182
+Cache Hits:      10 (6.6%)
+Cache Misses:    141
+Passthrough:     31
+Coalesced:       0
+Revalidated:     0 (304 responses)
+Cache Size:      67 / 1000 entries
+Cache Bytes:     371056 / 67108864 bytes
+Cache Rejected:  0
+
+Top Commands:
+  pr edit                  0 hits / 0 misses  (0.0%)
+  pr merge                 0 hits / 0 misses  (0.0%)
+  api graphql              0 hits / 0 misses  (0.0%)
+  pr comment               0 hits / 0 misses  (0.0%)
+  pr view                  1 hits / 8 misses  (11.1%)
+  run list                 4 hits / 12 misses  (25.0%)
+  api -X                   0 hits / 0 misses  (0.0%)
+  api get                  4 hits / 118 misses  (3.3%)
+  api repos/chriscoveries/wick/issues/comments/6292973832 0 hits / 0 misses  (0.0%)
+  issue view               1 hits / 3 misses  (25.0%)
+  pr create                0 hits / 0 misses  (0.0%)
+2026-10-20T14:54:23Z
+Uptime:          38m 8s
+Total Requests:  182
+Cache Hits:      10 (6.6%)
+Cache Misses:    141
+Passthrough:     31
+Coalesced:       0
+Revalidated:     0 (304 responses)
+Cache Size:      67 / 1000 entries
+Cache Bytes:     371056 / 67108864 bytes
+Cache Rejected:  0
+
+Top Commands:
+  api -X                   0 hits / 0 misses  (0.0%)
+  api repos/chriscoveries/wick/issues/comments/6292973832 0 hits / 0 misses  (0.0%)
+  issue view               1 hits / 3 misses  (25.0%)
+  pr comment               0 hits / 0 misses  (0.0%)
+  pr create                0 hits / 0 misses  (0.0%)
+  api get                  4 hits / 118 misses  (3.3%)
+  api graphql              0 hits / 0 misses  (0.0%)
+  pr edit                  0 hits / 0 misses  (0.0%)
+  pr merge                 0 hits / 0 misses  (0.0%)
+  pr view                  1 hits / 8 misses  (11.1%)
+  run list                 4 hits / 12 misses  (25.0%)
+2026-10-20T14:55:23Z
+Uptime:          39m 8s
+Total Requests:  183
+Cache Hits:      10 (6.6%)
+Cache Misses:    142
+Passthrough:     31
+Coalesced:       0
+Revalidated:     0 (304 responses)
+Cache Size:      68 / 1000 entries
+Cache Bytes:     371574 / 67108864 bytes
+Cache Rejected:  0
+
+Top Commands:
+  pr view                  1 hits / 8 misses  (11.1%)
+  run list                 4 hits / 12 misses  (25.0%)
+  api graphql              0 hits / 0 misses  (0.0%)
+  pr create                0 hits / 0 misses  (0.0%)
+  pr merge                 0 hits / 0 misses  (0.0%)
+  api -X                   0 hits / 0 misses  (0.0%)
+  api get                  4 hits / 119 misses  (3.3%)
+  api repos/chriscoveries/wick/issues/comments/6292973832 0 hits / 0 misses  (0.0%)
+  issue view               1 hits / 3 misses  (25.0%)
+  pr comment               0 hits / 0 misses  (0.0%)
+  pr edit                  0 hits / 0 misses  (0.0%)
+2026-10-20T14:56:23Z
+Uptime:          40m 8s
+Total Requests:  194
+Cache Hits:      11 (6.9%)
+Cache Misses:    149
+Passthrough:     34
+Coalesced:       0
+Revalidated:     0 (304 responses)
+Cache Size:      71 / 1000 entries
+Cache Bytes:     447432 / 67108864 bytes
+Cache Rejected:  0
+
+Top Commands:
+  pr edit                  0 hits / 0 misses  (0.0%)
+  run list                 4 hits / 12 misses  (25.0%)
+  api -X                   0 hits / 0 misses  (0.0%)
+  api get                  5 hits / 126 misses  (3.8%)
+  api repos/chriscoveries/wick/issues/comments/6292973832 0 hits / 0 misses  (0.0%)
+  issue view               1 hits / 3 misses  (25.0%)
+  pr comment               0 hits / 0 misses  (0.0%)
+  pr merge                 0 hits / 0 misses  (0.0%)
+  pr view                  1 hits / 8 misses  (11.1%)
+  api graphql              0 hits / 0 misses  (0.0%)
+  pr create                0 hits / 0 misses  (0.0%)
+2026-10-20T14:57:23Z
+Uptime:          41m 8s
+Total Requests:  195
+Cache Hits:      11 (6.8%)
+Cache Misses:    150
+Passthrough:     34
+Coalesced:       0
+Revalidated:     0 (304 responses)
+Cache Size:      72 / 1000 entries
+Cache Bytes:     447511 / 67108864 bytes
+Cache Rejected:  0
+
+Top Commands:
+  pr comment               0 hits / 0 misses  (0.0%)
+  pr create                0 hits / 0 misses  (0.0%)
+  pr view                  1 hits / 8 misses  (11.1%)
+  api -X                   0 hits / 0 misses  (0.0%)
+  issue view               1 hits / 3 misses  (25.0%)
+  pr edit                  0 hits / 0 misses  (0.0%)
+  pr merge                 0 hits / 0 misses  (0.0%)
+  run list                 4 hits / 12 misses  (25.0%)
+  api get                  5 hits / 127 misses  (3.8%)
+  api graphql              0 hits / 0 misses  (0.0%)
+  api repos/chriscoveries/wick/issues/comments/6292973832 0 hits / 0 misses  (0.0%)
+2026-10-20T14:58:23Z
+Uptime:          42m 8s
+Total Requests:  208
+Cache Hits:      13 (7.5%)
+Cache Misses:    160
+Passthrough:     35
+Coalesced:       0
+Revalidated:     0 (304 responses)
+Cache Size:      74 / 1000 entries
+Cache Bytes:     821831 / 67108864 bytes
+Cache Rejected:  0
+
+Top Commands:
+  api graphql              0 hits / 0 misses  (0.0%)
+  issue view               1 hits / 3 misses  (25.0%)
+  pr comment               0 hits / 0 misses  (0.0%)
+  pr create                0 hits / 0 misses  (0.0%)
+  pr edit                  0 hits / 0 misses  (0.0%)
+  pr list                  0 hits / 1 misses  (0.0%)
+  api get                  5 hits / 133 misses  (3.6%)
+  api repos/chriscoveries/wick/issues/comments/6292973832 0 hits / 0 misses  (0.0%)
+  pr merge                 0 hits / 0 misses  (0.0%)
+  pr view                  3 hits / 11 misses  (21.4%)
+  run list                 4 hits / 12 misses  (25.0%)
+  api -X                   0 hits / 0 misses  (0.0%)
+2026-10-20T14:59:23Z
+Uptime:          43m 8s
+Total Requests:  244
+Cache Hits:      17 (8.2%)
+Cache Misses:    191
+Passthrough:     36
+Coalesced:       0
+Revalidated:     0 (304 responses)
+Cache Size:      104 / 1000 entries
+Cache Bytes:     1224820 / 67108864 bytes
+Cache Rejected:  0
+
+Top Commands:
+  pr edit                  0 hits / 0 misses  (0.0%)
+  pr view                  6 hits / 11 misses  (35.3%)
+  run list                 4 hits / 13 misses  (23.5%)
+  api get                  6 hits / 160 misses  (3.6%)
+  api graphql              0 hits / 0 misses  (0.0%)
+  pr checks                0 hits / 1 misses  (0.0%)
+  pr list                  0 hits / 1 misses  (0.0%)
+  pr merge                 0 hits / 0 misses  (0.0%)
+  run view                 0 hits / 1 misses  (0.0%)
+  api -X                   0 hits / 0 misses  (0.0%)
+  api repos/chriscoveries/wick/issues/comments/6292973832 0 hits / 0 misses  (0.0%)
+  issue view               1 hits / 4 misses  (20.0%)
+  pr comment               0 hits / 0 misses  (0.0%)
+  pr create                0 hits / 0 misses  (0.0%)
+2026-10-20T15:00:23Z
+Uptime:          44m 8s
+Total Requests:  292
+Cache Hits:      17 (6.6%)
+Cache Misses:    239
+Passthrough:     36
+Coalesced:       0
+Revalidated:     0 (304 responses)
+Cache Size:      152 / 1000 entries
+Cache Bytes:     1247411 / 67108864 bytes
+Cache Rejected:  0
+
+Top Commands:
+  pr list                  0 hits / 1 misses  (0.0%)
+  pr view                  6 hits / 11 misses  (35.3%)
+  run view                 0 hits / 1 misses  (0.0%)
+  api get                  6 hits / 208 misses  (2.8%)
+  api graphql              0 hits / 0 misses  (0.0%)
+  issue view               1 hits / 4 misses  (20.0%)
+  pr checks                0 hits / 1 misses  (0.0%)
+  pr edit                  0 hits / 0 misses  (0.0%)
+  pr merge                 0 hits / 0 misses  (0.0%)
+  run list                 4 hits / 13 misses  (23.5%)
+  api -X                   0 hits / 0 misses  (0.0%)
+  api repos/chriscoveries/wick/issues/comments/6292973832 0 hits / 0 misses  (0.0%)
+  pr comment               0 hits / 0 misses  (0.0%)
+  pr create                0 hits / 0 misses  (0.0%)
+2026-10-20T15:01:23Z
+Uptime:          45m 8s
+Total Requests:  328
+Cache Hits:      17 (5.8%)
+Cache Misses:    274
+Passthrough:     37
+Coalesced:       0
+Revalidated:     0 (304 responses)
+Cache Size:      171 / 1000 entries
+Cache Bytes:     1229098 / 67108864 bytes
+Cache Rejected:  0
+
+Top Commands:
+  api graphql              0 hits / 0 misses  (0.0%)
+  issue view               1 hits / 4 misses  (20.0%)
+  pr checks                0 hits / 1 misses  (0.0%)
+  pr comment               0 hits / 0 misses  (0.0%)
+  pr edit                  0 hits / 0 misses  (0.0%)
+  pr list                  0 hits / 1 misses  (0.0%)
+  pr merge                 0 hits / 0 misses  (0.0%)
+  pr view                  6 hits / 11 misses  (35.3%)
+  api -X                   0 hits / 0 misses  (0.0%)
+  api get                  6 hits / 242 misses  (2.4%)
+  api repos/chriscoveries/wick/issues/comments/6292973832 0 hits / 0 misses  (0.0%)
+  pr create                0 hits / 0 misses  (0.0%)
+  run list                 4 hits / 14 misses  (22.2%)
+  run view                 0 hits / 1 misses  (0.0%)
+2026-10-20T15:02:23Z
+Uptime:          46m 8s
+Total Requests:  335
+Cache Hits:      18 (6.1%)
+Cache Misses:    279
+Passthrough:     38
+Coalesced:       0
+Revalidated:     0 (304 responses)
+Cache Size:      175 / 1000 entries
+Cache Bytes:     1309014 / 67108864 bytes
+Cache Rejected:  0
+
+Top Commands:
+  api graphql              0 hits / 0 misses  (0.0%)
+  api repos/chriscoveries/wick/issues/comments/6292973832 0 hits / 0 misses  (0.0%)
+  pr create                0 hits / 0 misses  (0.0%)
+  pr merge                 0 hits / 0 misses  (0.0%)
+  pr view                  7 hits / 14 misses  (33.3%)
+  run view                 0 hits / 1 misses  (0.0%)
+  api get                  6 hits / 244 misses  (2.4%)
+  issue view               1 hits / 4 misses  (20.0%)
+  pr checks                0 hits / 1 misses  (0.0%)
+  pr comment               0 hits / 0 misses  (0.0%)
+  pr edit                  0 hits / 0 misses  (0.0%)
+  pr list                  0 hits / 1 misses  (0.0%)
+  run list                 4 hits / 14 misses  (22.2%)
+  api -X                   0 hits / 0 misses  (0.0%)
+2026-10-20T15:03:23Z
+Uptime:          47m 8s
+Total Requests:  337
+Cache Hits:      18 (6.0%)
+Cache Misses:    281
+Passthrough:     38
+Coalesced:       0
+Revalidated:     0 (304 responses)
+Cache Size:      177 / 1000 entries
+Cache Bytes:     1355211 / 67108864 bytes
+Cache Rejected:  0
+
+Top Commands:
+  pr create                0 hits / 0 misses  (0.0%)
+  pr edit                  0 hits / 0 misses  (0.0%)
+  pr list                  0 hits / 1 misses  (0.0%)
+  pr view                  7 hits / 14 misses  (33.3%)
+  run list                 4 hits / 15 misses  (21.1%)
+  run view                 0 hits / 1 misses  (0.0%)
+  api -X                   0 hits / 0 misses  (0.0%)
+  api graphql              0 hits / 0 misses  (0.0%)
+  api repos/chriscoveries/wick/issues/comments/6292973832 0 hits / 0 misses  (0.0%)
+  issue view               1 hits / 4 misses  (20.0%)
+  pr checks                0 hits / 1 misses  (0.0%)
+  pr comment               0 hits / 0 misses  (0.0%)
+  pr merge                 0 hits / 0 misses  (0.0%)
+  api get                  6 hits / 245 misses  (2.4%)
+2026-10-20T15:04:24Z
+Uptime:          48m 8s
+Total Requests:  339
+Cache Hits:      18 (6.0%)
+Cache Misses:    283
+Passthrough:     38
+Coalesced:       0
+Revalidated:     0 (304 responses)
+Cache Size:      179 / 1000 entries
+Cache Bytes:     1355922 / 67108864 bytes
+Cache Rejected:  0
+
+Top Commands:
+  pr merge                 0 hits / 0 misses  (0.0%)
+  pr view                  7 hits / 14 misses  (33.3%)
+  api -X                   0 hits / 0 misses  (0.0%)
+  api graphql              0 hits / 0 misses  (0.0%)
+  issue view               1 hits / 4 misses  (20.0%)
+  pr create                0 hits / 0 misses  (0.0%)
+  pr list                  0 hits / 1 misses  (0.0%)
+  run list                 4 hits / 15 misses  (21.1%)
+  run view                 0 hits / 1 misses  (0.0%)
+  api get                  6 hits / 247 misses  (2.4%)
+  api repos/chriscoveries/wick/issues/comments/6292973832 0 hits / 0 misses  (0.0%)
+  pr checks                0 hits / 1 misses  (0.0%)
+  pr comment               0 hits / 0 misses  (0.0%)
+  pr edit                  0 hits / 0 misses  (0.0%)
+2026-10-20T15:05:24Z
+Uptime:          49m 9s
+Total Requests:  342
+Cache Hits:      18 (5.9%)
+Cache Misses:    285
+Passthrough:     39
+Coalesced:       0
+Revalidated:     0 (304 responses)
+Cache Size:      181 / 1000 entries
+Cache Bytes:     1355931 / 67108864 bytes
+Cache Rejected:  0
+
+Top Commands:
+  api repos/chriscoveries/wick/issues/comments/6292973832 0 hits / 0 misses  (0.0%)
+  pr checks                0 hits / 1 misses  (0.0%)
+  pr create                0 hits / 0 misses  (0.0%)
+  pr list                  0 hits / 1 misses  (0.0%)
+  pr merge                 0 hits / 0 misses  (0.0%)
+  run view                 0 hits / 1 misses  (0.0%)
+  api get                  6 hits / 249 misses  (2.4%)
+  issue view               1 hits / 4 misses  (20.0%)
+  pr comment               0 hits / 0 misses  (0.0%)
+  pr edit                  0 hits / 0 misses  (0.0%)
+  pr view                  7 hits / 14 misses  (33.3%)
+  run list                 4 hits / 15 misses  (21.1%)
+  api -X                   0 hits / 0 misses  (0.0%)
+  api graphql              0 hits / 0 misses  (0.0%)
+2026-10-20T15:06:24Z
+Uptime:          50m 9s
+Total Requests:  343
+Cache Hits:      18 (5.9%)
+Cache Misses:    286
+Passthrough:     39
+Coalesced:       0
+Revalidated:     0 (304 responses)
+Cache Size:      182 / 1000 entries
+Cache Bytes:     1356449 / 67108864 bytes
+Cache Rejected:  0
+
+Top Commands:
+  pr comment               0 hits / 0 misses  (0.0%)
+  pr merge                 0 hits / 0 misses  (0.0%)
+  run list                 4 hits / 15 misses  (21.1%)
+  api get                  6 hits / 250 misses  (2.3%)
+  api repos/chriscoveries/wick/issues/comments/6292973832 0 hits / 0 misses  (0.0%)
+  pr checks                0 hits / 1 misses  (0.0%)
+  pr create                0 hits / 0 misses  (0.0%)
+  pr edit                  0 hits / 0 misses  (0.0%)
+  pr list                  0 hits / 1 misses  (0.0%)
+  pr view                  7 hits / 14 misses  (33.3%)
+  run view                 0 hits / 1 misses  (0.0%)
+  api -X                   0 hits / 0 misses  (0.0%)
+  api graphql              0 hits / 0 misses  (0.0%)
+  issue view               1 hits / 4 misses  (20.0%)
+2026-10-20T15:07:24Z
+Uptime:          51m 9s
+Total Requests:  343
+Cache Hits:      18 (5.9%)
+Cache Misses:    286
+Passthrough:     39
+Coalesced:       0
+Revalidated:     0 (304 responses)
+Cache Size:      182 / 1000 entries
+Cache Bytes:     1356449 / 67108864 bytes
+Cache Rejected:  0
+
+Top Commands:
+  run view                 0 hits / 1 misses  (0.0%)
+  api graphql              0 hits / 0 misses  (0.0%)
+  api repos/chriscoveries/wick/issues/comments/6292973832 0 hits / 0 misses  (0.0%)
+  pr comment               0 hits / 0 misses  (0.0%)
+  pr list                  0 hits / 1 misses  (0.0%)
+  pr merge                 0 hits / 0 misses  (0.0%)
+  pr view                  7 hits / 14 misses  (33.3%)
+  api -X                   0 hits / 0 misses  (0.0%)
+  api get                  6 hits / 250 misses  (2.3%)
+  issue view               1 hits / 4 misses  (20.0%)
+  pr checks                0 hits / 1 misses  (0.0%)
+  pr create                0 hits / 0 misses  (0.0%)
+  pr edit                  0 hits / 0 misses  (0.0%)
+  run list                 4 hits / 15 misses  (21.1%)
+2026-10-20T15:08:24Z
+Uptime:          52m 9s
+Total Requests:  351
+Cache Hits:      18 (5.8%)
+Cache Misses:    293
+Passthrough:     40
+Coalesced:       0
+Revalidated:     0 (304 responses)
+Cache Size:      185 / 1000 entries
+Cache Bytes:     1365246 / 67108864 bytes
+Cache Rejected:  0
+
+Top Commands:
+  run view                 0 hits / 3 misses  (0.0%)
+  api get                  6 hits / 255 misses  (2.3%)
+  api graphql              0 hits / 0 misses  (0.0%)
+  pr comment               0 hits / 0 misses  (0.0%)
+  pr create                0 hits / 0 misses  (0.0%)
+  pr edit                  0 hits / 0 misses  (0.0%)
+  pr list                  0 hits / 1 misses  (0.0%)
+  pr merge                 0 hits / 0 misses  (0.0%)
+  pr view                  7 hits / 14 misses  (33.3%)
+  api -X                   0 hits / 0 misses  (0.0%)
+  api repos/chriscoveries/wick/issues/comments/6292973832 0 hits / 0 misses  (0.0%)
+  issue view               1 hits / 4 misses  (20.0%)
+  pr checks                0 hits / 1 misses  (0.0%)
+  run list                 4 hits / 15 misses  (21.1%)
+2026-10-20T15:09:24Z
+Uptime:          53m 9s
+Total Requests:  353
+Cache Hits:      18 (5.8%)
+Cache Misses:    295
+Passthrough:     40
+Coalesced:       0
+Revalidated:     0 (304 responses)
+Cache Size:      187 / 1000 entries
+Cache Bytes:     1365248 / 67108864 bytes
+Cache Rejected:  0
+
+Top Commands:
+  run list                 4 hits / 15 misses  (21.1%)
+  run view                 0 hits / 3 misses  (0.0%)
+  api graphql              0 hits / 0 misses  (0.0%)
+  api repos/chriscoveries/wick/issues/comments/6292973832 0 hits / 0 misses  (0.0%)
+  issue view               1 hits / 4 misses  (20.0%)
+  pr comment               0 hits / 0 misses  (0.0%)
+  pr create                0 hits / 0 misses  (0.0%)
+  pr merge                 0 hits / 0 misses  (0.0%)
+  api -X                   0 hits / 0 misses  (0.0%)
+  api get                  6 hits / 257 misses  (2.3%)
+  pr checks                0 hits / 1 misses  (0.0%)
+  pr edit                  0 hits / 0 misses  (0.0%)
+  pr list                  0 hits / 1 misses  (0.0%)
+  pr view                  7 hits / 14 misses  (33.3%)
+2026-10-20T15:10:24Z
+Uptime:          54m 9s
+Total Requests:  356
+Cache Hits:      18 (5.7%)
+Cache Misses:    298
+Passthrough:     40
+Coalesced:       0
+Revalidated:     0 (304 responses)
+Cache Size:      190 / 1000 entries
+Cache Bytes:     1365251 / 67108864 bytes
+Cache Rejected:  0
+
+Top Commands:
+  pr checks                0 hits / 1 misses  (0.0%)
+  pr list                  0 hits / 1 misses  (0.0%)
+  pr view                  7 hits / 14 misses  (33.3%)
+  run list                 4 hits / 15 misses  (21.1%)
+  run view                 0 hits / 3 misses  (0.0%)
+  api -X                   0 hits / 0 misses  (0.0%)
+  api get                  6 hits / 260 misses  (2.3%)
+  api repos/chriscoveries/wick/issues/comments/6292973832 0 hits / 0 misses  (0.0%)
+  pr comment               0 hits / 0 misses  (0.0%)
+  pr create                0 hits / 0 misses  (0.0%)
+  pr edit                  0 hits / 0 misses  (0.0%)
+  pr merge                 0 hits / 0 misses  (0.0%)
+  api graphql              0 hits / 0 misses  (0.0%)
+  issue view               1 hits / 4 misses  (20.0%)
+2026-10-20T15:11:24Z
+Uptime:          55m 9s
+Total Requests:  360
+Cache Hits:      18 (5.6%)
+Cache Misses:    301
+Passthrough:     41
+Coalesced:       0
+Revalidated:     0 (304 responses)
+Cache Size:      193 / 1000 entries
+Cache Bytes:     1365408 / 67108864 bytes
+Cache Rejected:  0
+
+Top Commands:
+  pr edit                  0 hits / 0 misses  (0.0%)
+  pr list                  0 hits / 1 misses  (0.0%)
+  pr merge                 0 hits / 0 misses  (0.0%)
+  api -X                   0 hits / 0 misses  (0.0%)
+  api repos/chriscoveries/wick/issues/comments/6292973832 0 hits / 0 misses  (0.0%)
+  pr checks                0 hits / 1 misses  (0.0%)
+  pr view                  7 hits / 14 misses  (33.3%)
+  run list                 4 hits / 15 misses  (21.1%)
+  run view                 0 hits / 3 misses  (0.0%)
+  api get                  6 hits / 263 misses  (2.2%)
+  api graphql              0 hits / 0 misses  (0.0%)
+  issue view               1 hits / 4 misses  (20.0%)
+  pr comment               0 hits / 0 misses  (0.0%)
+  pr create                0 hits / 0 misses  (0.0%)
+2026-10-20T15:12:24Z
+Uptime:          56m 9s
+Total Requests:  364
+Cache Hits:      18 (5.6%)
+Cache Misses:    305
+Passthrough:     41
+Coalesced:       0
+Revalidated:     0 (304 responses)
+Cache Size:      196 / 1000 entries
+Cache Bytes:     1366356 / 67108864 bytes
+Cache Rejected:  0
+
+Top Commands:
+  api get                  6 hits / 265 misses  (2.2%)
+  api graphql              0 hits / 0 misses  (0.0%)
+  pr comment               0 hits / 0 misses  (0.0%)
+  pr create                0 hits / 0 misses  (0.0%)
+  pr edit                  0 hits / 0 misses  (0.0%)
+  pr merge                 0 hits / 0 misses  (0.0%)
+  run list                 4 hits / 15 misses  (21.1%)
+  run view                 0 hits / 3 misses  (0.0%)
+  api -X                   0 hits / 0 misses  (0.0%)
+  api repos/chriscoveries/wick/issues/comments/6292973832 0 hits / 0 misses  (0.0%)
+  issue view               1 hits / 5 misses  (16.7%)
+  pr checks                0 hits / 1 misses  (0.0%)
+  pr list                  0 hits / 1 misses  (0.0%)
+  pr view                  7 hits / 15 misses  (31.8%)
+2026-10-20T15:13:24Z
+Uptime:          57m 9s
+Total Requests:  370
+Cache Hits:      18 (5.5%)
+Cache Misses:    310
+Passthrough:     42
+Coalesced:       0
+Revalidated:     0 (304 responses)
+Cache Size:      194 / 1000 entries
+Cache Bytes:     1351233 / 67108864 bytes
+Cache Rejected:  0
+
+Top Commands:
+  pr comment               0 hits / 0 misses  (0.0%)
+  pr list                  0 hits / 1 misses  (0.0%)
+  run list                 4 hits / 15 misses  (21.1%)
+  run view                 0 hits / 3 misses  (0.0%)
+  api -X                   0 hits / 0 misses  (0.0%)
+  api get                  6 hits / 269 misses  (2.2%)
+  api graphql              0 hits / 0 misses  (0.0%)
+  pr create                0 hits / 0 misses  (0.0%)
+  pr edit                  0 hits / 0 misses  (0.0%)
+  pr merge                 0 hits / 0 misses  (0.0%)
+  pr view                  7 hits / 15 misses  (31.8%)
+  api repos/chriscoveries/wick/issues/comments/6292973832 0 hits / 0 misses  (0.0%)
+  issue view               1 hits / 5 misses  (16.7%)
+  pr checks                0 hits / 2 misses  (0.0%)
+2026-10-20T15:14:24Z
+Uptime:          58m 9s
+Total Requests:  373
+Cache Hits:      18 (5.5%)
+Cache Misses:    311
+Passthrough:     44
+Coalesced:       0
+Revalidated:     0 (304 responses)
+Cache Size:      178 / 1000 entries
+Cache Bytes:     1351119 / 67108864 bytes
+Cache Rejected:  0
+
+Top Commands:
+  pr checks                0 hits / 2 misses  (0.0%)
+  pr edit                  0 hits / 0 misses  (0.0%)
+  pr list                  0 hits / 1 misses  (0.0%)
+  run view                 0 hits / 3 misses  (0.0%)
+  api -X                   0 hits / 0 misses  (0.0%)
+  api get                  6 hits / 270 misses  (2.2%)
+  issue view               1 hits / 5 misses  (16.7%)
+  pr comment               0 hits / 0 misses  (0.0%)
+  pr create                0 hits / 0 misses  (0.0%)
+  pr merge                 0 hits / 0 misses  (0.0%)
+  pr view                  7 hits / 15 misses  (31.8%)
+  run list                 4 hits / 15 misses  (21.1%)
+  api graphql              0 hits / 0 misses  (0.0%)
+  api repos/chriscoveries/wick/issues/comments/6292973832 0 hits / 0 misses  (0.0%)
+2026-10-20T15:15:25Z
+Uptime:          59m 9s
+Total Requests:  376
+Cache Hits:      18 (5.4%)
+Cache Misses:    314
+Passthrough:     44
+Coalesced:       0
+Revalidated:     0 (304 responses)
+Cache Size:      181 / 1000 entries
+Cache Bytes:     1351130 / 67108864 bytes
+Cache Rejected:  0
+
+Top Commands:
+  api -X                   0 hits / 0 misses  (0.0%)
+  api repos/chriscoveries/wick/issues/comments/6292973832 0 hits / 0 misses  (0.0%)
+  issue view               1 hits / 5 misses  (16.7%)
+  pr create                0 hits / 0 misses  (0.0%)
+  pr edit                  0 hits / 0 misses  (0.0%)
+  pr merge                 0 hits / 0 misses  (0.0%)
+  pr view                  7 hits / 15 misses  (31.8%)
+  run list                 4 hits / 15 misses  (21.1%)
+  api get                  6 hits / 273 misses  (2.2%)
+  api graphql              0 hits / 0 misses  (0.0%)
+  pr checks                0 hits / 2 misses  (0.0%)
+  pr comment               0 hits / 0 misses  (0.0%)
+  pr list                  0 hits / 1 misses  (0.0%)
+  run view                 0 hits / 3 misses  (0.0%)
+2026-10-20T15:16:25Z
+Uptime:          1h 0m 10s
+Total Requests:  383
+Cache Hits:      18 (5.3%)
+Cache Misses:    320
+Passthrough:     45
+Coalesced:       0
+Revalidated:     0 (304 responses)
+Cache Size:      187 / 1000 entries
+Cache Bytes:     1351204 / 67108864 bytes
+Cache Rejected:  0
+
+Top Commands:
+  pr create                0 hits / 0 misses  (0.0%)
+  pr edit                  0 hits / 0 misses  (0.0%)
+  pr list                  0 hits / 1 misses  (0.0%)
+  pr checks                0 hits / 2 misses  (0.0%)
+  pr comment               0 hits / 0 misses  (0.0%)
+  pr merge                 0 hits / 0 misses  (0.0%)
+  pr view                  7 hits / 15 misses  (31.8%)
+  run list                 4 hits / 15 misses  (21.1%)
+  run view                 0 hits / 3 misses  (0.0%)
+  api -X                   0 hits / 0 misses  (0.0%)
+  api get                  6 hits / 279 misses  (2.1%)
+  api graphql              0 hits / 0 misses  (0.0%)
+  api repos/chriscoveries/wick/issues/comments/6292973832 0 hits / 0 misses  (0.0%)
+  issue view               1 hits / 5 misses  (16.7%)
+2026-10-20T15:17:25Z
+Uptime:          1h 1m 10s
+Total Requests:  389
+Cache Hits:      18 (5.2%)
+Cache Misses:    325
+Passthrough:     46
+Coalesced:       0
+Revalidated:     0 (304 responses)
+Cache Size:      192 / 1000 entries
+Cache Bytes:     1351786 / 67108864 bytes
+Cache Rejected:  0
+
+Top Commands:
+  api get                  6 hits / 284 misses  (2.1%)
+  api graphql              0 hits / 0 misses  (0.0%)
+  api repos/chriscoveries/wick/issues/comments/6292973832 0 hits / 0 misses  (0.0%)
+  pr checks                0 hits / 2 misses  (0.0%)
+  pr comment               0 hits / 0 misses  (0.0%)
+  pr create                0 hits / 0 misses  (0.0%)
+  pr view                  7 hits / 15 misses  (31.8%)
+  issue view               1 hits / 5 misses  (16.7%)
+  pr edit                  0 hits / 0 misses  (0.0%)
+  pr list                  0 hits / 1 misses  (0.0%)
+  pr merge                 0 hits / 0 misses  (0.0%)
+  run list                 4 hits / 15 misses  (21.1%)
+  run view                 0 hits / 3 misses  (0.0%)
+  api -X                   0 hits / 0 misses  (0.0%)
+2026-10-20T15:18:25Z
+Uptime:          1h 2m 10s
+Total Requests:  392
+Cache Hits:      18 (5.2%)
+Cache Misses:    327
+Passthrough:     47
+Coalesced:       0
+Revalidated:     0 (304 responses)
+Cache Size:      181 / 1000 entries
+Cache Bytes:     1351713 / 67108864 bytes
+Cache Rejected:  0
+
+Top Commands:
+  pr edit                  0 hits / 0 misses  (0.0%)
+  run view                 0 hits / 3 misses  (0.0%)
+  api graphql              0 hits / 0 misses  (0.0%)
+  api repos/chriscoveries/wick/issues/comments/6292973832 0 hits / 0 misses  (0.0%)
+  issue view               1 hits / 5 misses  (16.7%)
+  pr comment               0 hits / 0 misses  (0.0%)
+  pr list                  0 hits / 1 misses  (0.0%)
+  pr merge                 0 hits / 0 misses  (0.0%)
+  pr view                  7 hits / 15 misses  (31.8%)
+  run list                 4 hits / 16 misses  (20.0%)
+  api -X                   0 hits / 0 misses  (0.0%)
+  api get                  6 hits / 285 misses  (2.1%)
+  pr checks                0 hits / 2 misses  (0.0%)
+  pr create                0 hits / 0 misses  (0.0%)
+2026-10-20T15:19:25Z
+Uptime:          1h 3m 10s
+Total Requests:  398
+Cache Hits:      19 (5.4%)
+Cache Misses:    331
+Passthrough:     48
+Coalesced:       0
+Revalidated:     0 (304 responses)
+Cache Size:      170 / 1000 entries
+Cache Bytes:     1364929 / 67108864 bytes
+Cache Rejected:  0
+
+Top Commands:
+  api get                  6 hits / 287 misses  (2.0%)
+  api graphql              0 hits / 0 misses  (0.0%)
+  api repos/chriscoveries/wick/issues/comments/6292973832 0 hits / 0 misses  (0.0%)
+  pr view                  7 hits / 15 misses  (31.8%)
+  issue view               1 hits / 5 misses  (16.7%)
+  pr checks                0 hits / 2 misses  (0.0%)
+  pr create                0 hits / 0 misses  (0.0%)
+  pr edit                  0 hits / 0 misses  (0.0%)
+  run view                 1 hits / 4 misses  (20.0%)
+  api -X                   0 hits / 0 misses  (0.0%)
+  pr comment               0 hits / 0 misses  (0.0%)
+  run list                 4 hits / 17 misses  (19.0%)
+  workflow run             0 hits / 0 misses  (0.0%)
+  pr list                  0 hits / 1 misses  (0.0%)
+  pr merge                 0 hits / 0 misses  (0.0%)
+2026-10-20T15:20:25Z
+Uptime:          1h 4m 10s
+Total Requests:  406
+Cache Hits:      22 (6.2%)
+Cache Misses:    335
+Passthrough:     49
+Coalesced:       0
+Revalidated:     0 (304 responses)
+Cache Size:      173 / 1000 entries
+Cache Bytes:     1375147 / 67108864 bytes
+Cache Rejected:  0
+
+Top Commands:
+  pr view                  7 hits / 16 misses  (30.4%)
+  pr merge                 0 hits / 0 misses  (0.0%)
+  run view                 4 hits / 6 misses  (40.0%)
+  workflow run             0 hits / 0 misses  (0.0%)
+  api get                  6 hits / 288 misses  (2.0%)
+  pr create                0 hits / 0 misses  (0.0%)
+  api -X                   0 hits / 0 misses  (0.0%)
+  api graphql              0 hits / 0 misses  (0.0%)
+  pr comment               0 hits / 0 misses  (0.0%)
+  pr edit                  0 hits / 0 misses  (0.0%)
+  pr list                  0 hits / 1 misses  (0.0%)
+  run list                 4 hits / 17 misses  (19.0%)
+  api repos/chriscoveries/wick/issues/comments/6292973832 0 hits / 0 misses  (0.0%)
+  issue view               1 hits / 5 misses  (16.7%)
+  pr checks                0 hits / 2 misses  (0.0%)
