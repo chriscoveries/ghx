@@ -158,14 +158,15 @@ func (g *Gate) HitRate() float64 {
 
 // HourCalls reports the last hour's calls per caller. Attribution and
 // reporting only: no count here refuses a call.
-// HitCalls is the same last-hour window for reads answered from the shared
-// cache, per caller. It is the reuse half of the report: HourCalls is what the
-// box spent, HitCalls is what it saved.
-func (g *Gate) HitCalls() map[string]int64 {
+// prefixCalls is the same last-hour window for one stamped outcome per
+// caller: "hit:" reads answered from the shared cache, "304:" conditional
+// revalidations and "refused:" policy refusals. HourCalls is what the box
+// spent; the prefixed maps are why it spent or saved it.
+func (g *Gate) prefixCalls(prefix string) map[string]int64 {
 	out := map[string]int64{}
 	after := g.Now().Unix() - 3600
 	for key, calls := range g.State.Calls {
-		if !strings.HasPrefix(key, "hit:") {
+		if !strings.HasPrefix(key, prefix) {
 			continue
 		}
 		var count int64
@@ -175,17 +176,22 @@ func (g *Gate) HitCalls() map[string]int64 {
 			}
 		}
 		if count > 0 {
-			out[strings.TrimPrefix(key, "hit:")] = count
+			out[strings.TrimPrefix(key, prefix)] = count
 		}
 	}
 	return out
 }
 
+func (g *Gate) HitCalls() map[string]int64         { return g.prefixCalls("hit:") }
+func (g *Gate) RefusedCalls() map[string]int64     { return g.prefixCalls("refused:") }
+func (g *Gate) RevalidatedCalls() map[string]int64 { return g.prefixCalls("304:") }
+
 func (g *Gate) HourCalls() map[string]int64 {
 	out := map[string]int64{}
 	after := g.Now().Unix() - 3600
 	for key, calls := range g.State.Calls {
-		if strings.HasPrefix(key, "read:") || strings.HasPrefix(key, "hit:") || key == "box" {
+		if key == "box" || strings.HasPrefix(key, "read:") || strings.HasPrefix(key, "hit:") ||
+			strings.HasPrefix(key, "refused:") || strings.HasPrefix(key, "304:") || strings.HasPrefix(key, "chain:") {
 			continue
 		}
 		var count int64
@@ -351,6 +357,7 @@ func (g *Gate) RoundTrip(r *http.Request, c Caller) (result *http.Response) {
 
 	if reason != "" && !freeMeasurement {
 		g.State.Counts["refused"]++
+		g.State.Calls["refused:"+caller] = append(g.keep("refused:"+caller, now-3600), now)
 		if v := stale(reason); read && v != nil {
 			return v
 		}
@@ -481,6 +488,7 @@ func (g *Gate) RoundTrip(r *http.Request, c Caller) (result *http.Response) {
 			return failure(503, "cache save failed")
 		}
 		g.State.Counts["304"]++
+		g.State.Calls["304:"+caller] = append(g.keep("304:"+caller, now-3600), now)
 		// A revalidation is a call: it leaves the box and spends a GitHub
 		// request even though 304 costs no quota. Keeping the stamp is what
 		// makes hour_calls a call count rather than a quota count.
