@@ -23,6 +23,19 @@ import (
 	"github.com/brunoborges/ghx/src/internal/protocol"
 )
 
+// Unix socket paths must fit sockaddr_un.sun_path (~104 bytes); test temp
+// dirs under /var/folders on macOS can exceed that once the test name is
+// appended, so socket tests use a short-lived dir at the os temp root.
+func sockDir(t *testing.T) string {
+	t.Helper()
+	dir, err := os.MkdirTemp("", "g")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(dir) })
+	return dir
+}
+
 // Run the real kernel lock in a separate process; no in-memory substitute.
 func TestInstanceLockProcess(t *testing.T) {
 	path := os.Getenv("GHX_TEST_LOCK_PATH")
@@ -40,7 +53,7 @@ func TestInstanceLockProcess(t *testing.T) {
 }
 
 func TestInstanceLockAcrossProcesses(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "ghxd.sock")
+	path := filepath.Join(sockDir(t), "ghxd.sock")
 	cmd := exec.Command(os.Args[0], "-test.run=^TestInstanceLockProcess$")
 	cmd.Env = append(os.Environ(), "GHX_TEST_LOCK_PATH="+path)
 	stdin, err := cmd.StdinPipe()
@@ -94,7 +107,7 @@ func TestInstanceLockAcrossProcesses(t *testing.T) {
 }
 
 func TestStaleSocketCleanup(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "ghxd.sock")
+	path := filepath.Join(sockDir(t), "ghxd.sock")
 	if err := removeStaleSocket(path); err != nil {
 		t.Fatal(err)
 	}
@@ -131,7 +144,7 @@ func TestServerOwnershipAndConcurrentShutdown(t *testing.T) {
 	}
 	defer func() { other.Process.Kill(); other.Wait() }()
 	cfg := config.DefaultConfig()
-	dir := t.TempDir()
+	dir := sockDir(t)
 	cfg.SocketPath = filepath.Join(dir, "ghxd.sock")
 	cfg.PIDFile = filepath.Join(dir, "ghxd.pid")
 	cfg.DashboardPort = 0
@@ -204,7 +217,7 @@ func TestServerOwnershipAndConcurrentShutdown(t *testing.T) {
 
 func TestStartupFailureReleasesSocketAndLock(t *testing.T) {
 	cfg := config.DefaultConfig()
-	dir := t.TempDir()
+	dir := sockDir(t)
 	cfg.SocketPath = filepath.Join(dir, "ghxd.sock")
 	cfg.PIDFile = filepath.Join(dir, "not-directory", "ghxd.pid")
 	cfg.DashboardPort = 0
@@ -248,7 +261,7 @@ func TestOwnershipRetainedUntilHTTPDrain(t *testing.T) {
 		t.Fatal("HTTP request did not start")
 	}
 	cfg := config.DefaultConfig()
-	dir := t.TempDir()
+	dir := sockDir(t)
 	cfg.SocketPath = filepath.Join(dir, "ghxd.sock")
 	cfg.PIDFile = filepath.Join(dir, "ghxd.pid")
 	cfg.DashboardPort = 0
