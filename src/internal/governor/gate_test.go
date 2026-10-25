@@ -490,3 +490,39 @@ func TestRevalidateIsNeverAnsweredFromStaleDuringCooldown(t *testing.T) {
 	}
 	content(t, r)
 }
+
+func TestRefusalAndRevalidationStampPerCaller(t *testing.T) {
+	g := setup(t)
+	b := fixture(t)
+	calls := 0
+	g.Transport = transport(func(r *http.Request) (*http.Response, error) {
+		calls++
+		return response(200, b, http.Header{"Etag": []string{`"fixture"`}, "X-Ratelimit-Remaining": []string{"499"}, "X-Ratelimit-Reset": []string{"11000"}}), nil
+	})
+	content(t, g.RoundTrip(req("GET", "/repos/o/r/pulls/479"), caller))
+	if r := g.RoundTrip(req("GET", "/repos/o/r/pulls/480"), caller); r.StatusCode != 403 {
+		t.Fatal("floor refusal expected", r.StatusCode)
+	}
+	if got := g.RefusedCalls(); got["codex-A"] != 1 {
+		t.Fatal("refusal not stamped per caller", g.State.Calls)
+	}
+	if got := g.HourCalls(); got["codex-A"] != 1 {
+		t.Fatal("refused call must not count as an upstream call", got)
+	}
+	g.State.Rates = map[string]Rate{}
+	at := g.Now()
+	g.Now = func() time.Time { return at.Add(400 * time.Second) }
+	g.Transport = transport(func(r *http.Request) (*http.Response, error) {
+		return response(304, nil, http.Header{"X-Ratelimit-Remaining": []string{"600"}, "X-Ratelimit-Reset": []string{"11000"}}), nil
+	})
+	if r := g.RoundTrip(req("GET", "/repos/o/r/pulls/479"), caller); r.StatusCode != 200 {
+		t.Fatal(r.StatusCode)
+	}
+	content(t, g.RoundTrip(req("GET", "/repos/o/r/pulls/479"), caller))
+	if got := g.RevalidatedCalls(); got["codex-A"] != 1 {
+		t.Fatal("304 revalidation not stamped per caller", g.State.Calls)
+	}
+	if got := g.HourCalls(); got["codex-A"] != 2 {
+		t.Fatal("a revalidation is still a call", got)
+	}
+}
