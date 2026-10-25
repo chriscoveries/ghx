@@ -1,6 +1,8 @@
 name: CI
 
 on:
+  push:
+    branches: [main]
   pull_request:
     branches: [main]
   schedule:
@@ -10,14 +12,21 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
     strategy:
       matrix:
-        os: [ubuntu-latest, windows-latest]
-    runs-on: ${{ matrix.os }}
+        os: ${{ fromJSON(github.repository == 'chriscoveries/ghx' && '["ubuntu-latest"]' || '["ubuntu-latest", "windows-latest"]') }}
+    runs-on: ${{ matrix.os == 'ubuntu-latest' && fromJSON(vars.GHX_LINUX_RUNNER || (github.repository == 'chriscoveries/ghx' && '["self-hosted", "linux", "ghx-ci"]' || '["ubuntu-latest"]')) || matrix.os }}
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-go@v5
         with:
@@ -26,8 +35,15 @@ jobs:
       - name: Build
         run: go build ./...
 
+      - name: Cross compile
+        if: matrix.os == 'ubuntu-latest'
+        shell: bash
+        run: |
+          GOOS=windows GOARCH=amd64 go build ./...
+          GOOS=darwin GOARCH=arm64 go build ./...
+
       - name: Test
-        run: go test -v -race -coverprofile coverage.out ./...
+        run: go test -v -race -count=1 -coverprofile coverage.out ./...
 
       - name: Upload coverage
         if: matrix.os == 'ubuntu-latest'
@@ -37,9 +53,12 @@ jobs:
           path: coverage.out
 
   lint:
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(vars.GHX_LINUX_RUNNER || (github.repository == 'chriscoveries/ghx' && '["self-hosted", "linux", "ghx-ci"]' || '["ubuntu-latest"]')) }}
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-go@v5
         with:
@@ -54,7 +73,7 @@ jobs:
           test -z "$(gofmt -l .)"
 
   daily-test:
-    if: github.event_name != 'pull_request'
+    if: github.event_name != 'pull_request' && github.event_name != 'push' && github.repository != 'chriscoveries/ghx'
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
@@ -62,6 +81,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-go@v5
         with:
