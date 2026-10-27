@@ -1,8 +1,10 @@
 package daemon
 
 import (
+	"bytes"
 	"context"
-	"sync"
+	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -12,90 +14,151 @@ import (
 	execctx "github.com/brunoborges/ghx/src/internal/context"
 	"github.com/brunoborges/ghx/src/internal/executor"
 	"github.com/brunoborges/ghx/src/internal/protocol"
+	"github.com/brunoborges/ghx/src/internal/resource"
 )
 
-// Regression controls for the ghx upstream-sync union at f0edccf. Each test
-// names the concrete defect it guards against.
-
-// doSingleflightExec must Add(1) before Done() — missing Add panics the first
-// miss and lets a joiner read nil res. Leader/follower completion.
-func TestUnionRegression_FencedSingleflightWaitgroup(t *testing.T) {
+// The bodies come from the public captured ghx repository fixture. Channels
+// and invalidation are explicit schedule controls, not new API observations.
+func TestUnionSingleflightLeaderAndFollower(t *testing.T) {
 	h := newTestHandler()
-	started := make(chan struct{})
-	finish := make(chan struct{})
-	h.execute = func(_ context.Context, _ string, args []string, _ string, _ authenv.Environment) *executor.Result {
-		close(started)
-		<-finish
-		return &executor.Result{Stdout: []byte("data"), ExitCode: 0}
+	body := captured(t, "repository")
+	leader, shared := h.doSingleflightExec("leader", func() *executor.Result {
+		return &executor.Result{Stdout: body}
+	})
+	if shared || !bytes.Equal(leader.Stdout, body) {
+		t.Fatal("singleflight leader did not complete with the retained body")
 	}
-	var r *executor.Result
-	var done bool
+
+	// Seed a real in-flight waitgroup, hold its leader until the follower has
+	// started, then publish the captured body before releasing the waiter.
+	c := &call{}
+	c.wg.Add(1)
+	h.mu.Lock()
+	h.inflight["follower"] = c
+	h.mu.Unlock()
+	started, finished := make(chan struct{}), make(chan *executor.Result, 1)
+	joined := make(chan bool, 1)
 	go func() {
-		r, _ = h.doSingleflightExec("k", func() *executor.Result { return h.execGH([]string{"x"}, "", nil) })
-		done = true
+		close(started)
+		result, coalesced := h.doSingleflightExec("follower", func() *executor.Result {
+			return &executor.Result{ExitCode: 1}
+		})
+		joined <- coalesced
+		finished <- result
 	}()
 	<-started
-	go func() { r2, _ := h.doSingleflightExec("k", nil); _ = r2 }()
-	close(finish)
-	for !done {
-		time.Sleep(time.Millisecond)
-	}
-	if r == nil || string(r.Stdout) != "data" {
-		t.Fatal("leader result lost or waiter raced a nil res")
+	c.res = &executor.Result{Stdout: body}
+	c.wg.Done()
+	select {
+	case result := <-finished:
+		if !<-joined || !bytes.Equal(result.Stdout, body) {
+			t.Fatal("follower did not join the published result")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("follower did not complete")
 	}
 }
 
-// SetVersion fences the normalized fetch path: an invalidate between
-// cache.Get and the fetch's store must drop the body.
-func TestUnionRegression_NormalizedStoreFence(t *testing.T) {
+func TestUnionNormalizedPostInvalidateStartsNewFlight(t *testing.T) {
 	h := newTestHandler()
-	key := "k"
+	oldBody, newBody := captured(t, "pr21"), captured(t, "pr22")
+	started, release := make(chan struct{}), make(chan struct{})
+	var calls atomic.Int32
 	h.execute = func(_ context.Context, _ string, _ []string, _ string, _ authenv.Environment) *executor.Result {
-		h.cache.Invalidate(func(_ *cache.Entry) bool { return true })
-		return &executor.Result{Stdout: []byte("stale"), ExitCode: 0}
+		if calls.Add(1) == 1 {
+			close(started)
+			<-release
+			return &executor.Result{Stdout: oldBody}
+		}
+		return &executor.Result{Stdout: newBody}
 	}
-	result, version, _ := h.doSingleflight(key, []string{"api", "x"}, &protocol.Request{})
-	if result == nil {
-		t.Fatal("fetch returned nil")
+	req := &protocol.Request{Args: []string{"pr", "view", "21"}, Context: execctx.ExecContext{Host: "github.com", Repo: "brunoborges/ghx"}}
+	key := execctx.CacheKey(req.Context, req.Args)
+	oldDone := make(chan struct{})
+	go func() {
+		result, version, _ := h.doSingleflight(key, req.Args, req)
+		h.store(key, "pr_view", allowlist.Classification{}, req, result, version)
+		close(oldDone)
+	}()
+	<-started
+	h.cache.Invalidate(func(*cache.Entry) bool { return true })
+	type outcome struct {
+		result    *executor.Result
+		version   uint64
+		coalesced bool
 	}
-	h.store(key, "cmd", allowlist.Classification{}, &protocol.Request{}, result, version)
-	if got := h.cache.Get(key); got != nil {
-		t.Fatalf("stale body stored across an invalidate: %q", got.Stdout)
+	freshDone := make(chan outcome, 1)
+	go func() {
+		result, version, coalesced := h.doSingleflight(key, req.Args, req)
+		freshDone <- outcome{result, version, coalesced}
+	}()
+	select {
+	case fresh := <-freshDone:
+		if fresh.coalesced || !bytes.Equal(fresh.result.Stdout, newBody) {
+			close(release)
+			<-oldDone
+			t.Fatal("post-invalidation caller joined the old flight")
+		}
+		h.store(key, "pr_view", allowlist.Classification{}, req, fresh.result, fresh.version)
+	case <-time.After(5 * time.Second):
+		close(release)
+		<-oldDone
+		t.Fatal("post-invalidation caller waited for the old flight")
+	}
+	close(release)
+	<-oldDone
+	if entry := h.cache.Get(key); entry == nil || !bytes.Equal(entry.Stdout, newBody) || calls.Load() != 2 {
+		t.Fatal("old flight replaced the fresh retained body")
 	}
 }
 
-// InvalidateRepo carries generation++/persistLocked — without it,
-// invalidateWrite's api-scope route lets old fills resurrect and disk
-// removals vanish.
-func TestUnionRegression_InvalidateRepoBumpsAndPersists(t *testing.T) {
-	h := newTestHandler()
-	h.cache.Set(&cache.Entry{Key: "a", Stdout: []byte("x"), Host: "h", Repo: "o/r", CachedAt: time.Now()})
-	h.cache.Set(&cache.Entry{Key: "b", Stdout: []byte("y"), Host: "h", Repo: "o/r", CachedAt: time.Now()})
-	before := h.cache.Version()
-	if n := h.cache.InvalidateRepo("h", "o/r"); n != 2 {
-		t.Fatalf("InvalidateRepo = %d, want 2", n)
-	}
-	if h.cache.Version() == before {
-		t.Fatal("InvalidateRepo did not bump the generation")
-	}
-	if h.cache.Get("a") != nil || h.cache.Get("b") != nil {
-		t.Fatal("invalidated entries still returned")
-	}
-}
-
-// A 304 whose fetch straddled an invalidation must not return old.Stdout —
-// the fallthrough is charged as another upstream call by handleExec's
-// normal path, not free.
-func TestUnionRegression_304StaleBodyRefused(t *testing.T) {
+func TestUnionConditionalListInvalidationRefusesWithoutFallback(t *testing.T) {
 	h := newTestHandler()
 	h.cfg.ResourceViews = true
-	h.execute = func(_ context.Context, _ string, _ []string, _ string, _ authenv.Environment) *executor.Result {
-		h.cache.Invalidate(func(_ *cache.Entry) bool { return true })
+	req := &protocol.Request{Args: []string{"run", "list", "--json", "databaseId,status,conclusion", "-L", "1"},
+		Context: execctx.ExecContext{Host: "github.com", Repo: "chriscoveries/cifast", TokenHash: "identity"}}
+	s := resource.PrepareList(req.Context, req.Args)
+	if s == nil {
+		t.Fatal("retained list request has no resource shape")
+	}
+	body, err := translateRuns([]byte(runsCollection), strings.Split(resource.ListFields(s.Kind), ","))
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := execctx.CacheKey(s.Context, s.Args)
+	h.cache.Set(&cache.Entry{Key: key, Stdout: body, ETag: `"etag-1"`, CachedAt: time.Now().Add(-time.Hour), TTL: time.Minute})
+	var calls atomic.Int32
+	h.execute = func(_ context.Context, _ string, args []string, _ string, _ authenv.Environment) *executor.Result {
+		calls.Add(1)
+		if !strings.Contains(strings.Join(args, " "), "If-None-Match") {
+			return &executor.Result{ExitCode: 1, Stderr: []byte("unexpected fallback")}
+		}
+		h.cache.Invalidate(func(*cache.Entry) bool { return true })
 		return &executor.Result{Stdout: httpResponse("304 Not Modified", `"etag-1"`, "")}
 	}
-	resp := h.Handle(&protocol.Request{Type: protocol.TypeExec,
-		Args: []string{"api", "repos/o/r/actions/runs"}, Context: execctx.ExecContext{Host: "h", Repo: "o/r"}})
-	if resp == nil || string(resp.Stdout) == "old" {
-		t.Fatal("304 stale body was returned after an in-fetch invalidation")
+	result := h.Handle(req)
+	if result == nil || result.ExitCode == 0 || result.Cached || calls.Load() != 1 || h.cache.Peek(key) != nil {
+		t.Fatal("straddled 304 must refuse without returning, restoring, or refetching the old body")
+	}
+}
+
+func TestUnionConditionalGETInvalidationRefusesWithoutFallback(t *testing.T) {
+	h := newTestHandler()
+	body := captured(t, "repository")
+	req := &protocol.Request{Args: []string{"api", "repos/brunoborges/ghx"}, Context: execctx.ExecContext{Host: "github.com", Repo: "brunoborges/ghx", TokenHash: "identity"}}
+	key := execctx.CacheKey(req.Context, req.Args)
+	h.cache.Set(&cache.Entry{Key: key, Stdout: body, ETag: `W/"captured"`, TTL: time.Second, CachedAt: time.Now().Add(-time.Minute)})
+	var calls atomic.Int32
+	h.execute = func(_ context.Context, _ string, args []string, _ string, _ authenv.Environment) *executor.Result {
+		calls.Add(1)
+		if !strings.Contains(strings.Join(args, " "), "If-None-Match") {
+			return &executor.Result{ExitCode: 1, Stderr: []byte("unexpected fallback")}
+		}
+		h.cache.Invalidate(func(*cache.Entry) bool { return true })
+		return &executor.Result{Stdout: httpOutput(nil, 304, "")}
+	}
+	result := h.Handle(req)
+	if result == nil || result.ExitCode == 0 || result.Cached || calls.Load() != 1 || h.cache.Peek(key) != nil {
+		t.Fatal("straddled conditional GET must refuse without returning, restoring, or refetching the old body")
 	}
 }

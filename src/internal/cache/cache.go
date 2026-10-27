@@ -138,12 +138,16 @@ func (c *Cache) Version() uint64 {
 	return c.generation
 }
 
-func (c *Cache) SetVersion(entry *Entry, version uint64) {
+// SetVersion atomically fences the insertion against invalidation. A false
+// return means callers must not use it as proof that an older body is current.
+func (c *Cache) SetVersion(entry *Entry, version uint64) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.generation == version {
 		c.set(entry)
+		return true
 	}
+	return false
 }
 
 func (c *Cache) set(entry *Entry) {

@@ -47,3 +47,41 @@ func TestDiskFailureRemovesStaleSnapshot(t *testing.T) {
 		t.Fatal("disk failure invisible")
 	}
 }
+
+// Reuse the retained public repository response, with explicit invalidation
+// and restart controls; the empty invalidation must fence in-flight fills too.
+func TestRepoInvalidationFencesEmptyAndPersistsDeletion(t *testing.T) {
+	body, err := os.ReadFile("../../../testdata/resource/repository.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "cache.json")
+	c := New(10)
+	if err := c.EnableDisk(path); err != nil {
+		t.Fatal(err)
+	}
+	version := c.Version()
+	if n := c.InvalidateRepo("github.com", "brunoborges/ghx"); n != 0 || c.Version() == version {
+		t.Fatal("empty repo invalidation did not advance the fence")
+	}
+	key := "0123456789012345678901234567890123456789012345678901234567890123"
+	entry := &Entry{Key: key, Stdout: body, Host: "github.com", Repo: "brunoborges/ghx", CachedAt: time.Now(), TTL: time.Hour}
+	if c.SetVersion(entry, version) || c.Get(key) != nil {
+		t.Fatal("empty invalidation accepted a stale fill")
+	}
+	c.Set(entry)
+	if c.Get(key) == nil {
+		t.Fatal("fixture was not retained before invalidation")
+	}
+	version = c.Version()
+	if n := c.InvalidateRepo("github.com", "brunoborges/ghx"); n != 1 || c.Version() == version || c.Get(key) != nil {
+		t.Fatal("repo invalidation failed to remove and fence the retained entry")
+	}
+	reloaded := New(10)
+	if err := reloaded.EnableDisk(path); err != nil {
+		t.Fatal(err)
+	}
+	if reloaded.Peek(key) != nil {
+		t.Fatal("disk reload resurrected the invalidated entry")
+	}
+}

@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -196,6 +197,9 @@ func TestServerOwnershipAndConcurrentShutdown(t *testing.T) {
 	go func() { finished <- s.Run() }()
 	defer s.Shutdown()
 	waitForServerReady(t, cfg.SocketPath, finished)
+	if err := other.Process.Signal(syscall.Signal(0)); err != nil {
+		t.Fatalf("startup changed unrelated PID ownership: %v", err)
+	}
 	select {
 	case <-otherExited:
 		t.Fatalf("startup signalled unrelated PID: %v", otherErr)

@@ -415,6 +415,7 @@ func (h *Handler) doSingleflightExec(key string, execute func() *executor.Result
 		return c.res, true
 	}
 	c := &call{}
+	c.wg.Add(1)
 	h.inflight[key] = c
 	h.mu.Unlock()
 	c.res = execute()
@@ -434,7 +435,9 @@ func keyContext(ctx execctx.ExecContext, cl allowlist.Classification) execctx.Ex
 
 func (h *Handler) doSingleflight(key string, args []string, req *protocol.Request) (*executor.Result, uint64, bool) {
 	h.mu.Lock()
-	if c, ok := h.inflight[key]; ok {
+	version := h.cache.Version()
+	flightKey := fmt.Sprintf("normalized/%s/%d", key, version)
+	if c, ok := h.inflight[flightKey]; ok {
 		h.mu.Unlock()
 		c.wg.Wait()
 		// Coalesced onto a fetch that started at the recorded generation: the
@@ -442,16 +445,16 @@ func (h *Handler) doSingleflight(key string, args []string, req *protocol.Reques
 		return c.res, c.version, true
 	}
 
-	c := &call{version: h.cache.Version()}
+	c := &call{version: version}
 	c.wg.Add(1)
-	h.inflight[key] = c
+	h.inflight[flightKey] = c
 	h.mu.Unlock()
 
 	c.res = h.execGH(args, req.WorkDir, req.AuthEnv)
 	c.wg.Done()
 
 	h.mu.Lock()
-	delete(h.inflight, key)
+	delete(h.inflight, flightKey)
 	h.mu.Unlock()
 
 	return c.res, c.version, false

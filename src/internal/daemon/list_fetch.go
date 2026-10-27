@@ -26,7 +26,9 @@ import (
 // are answered by bytes that have not changed. The CLI does not expose
 // validators, so an expired entry used to mean a full refetch. Reading the same
 // collection through the REST endpoint the CLI uses gives the daemon an ETag to
-// hand back, and a 304 then refreshes the cached bytes without spending quota.
+// hand back, and a 304 can refresh the cached bytes. When the fleet proxy is
+// configured it separately attributes the conditional request; do not infer
+// quota or accounting from the response status alone.
 
 // restRunFields maps the JSON names `gh run list --json` accepts onto the
 // representation the REST endpoint returns. A field outside this table keeps
@@ -178,20 +180,16 @@ func (h *Handler) handleConditionalList(req *protocol.Request, s *resource.Shape
 		if old == nil || old.ETag == "" {
 			return nil
 		}
-		// The fetch straddled an invalidation: the 304 body is the stale
-		// representation the mutation was meant to drop. Refuse it — the
-		// caller's normal path re-reads once, no implicit retry is made here.
-		if h.cache.Version() != version {
-			return nil
-		}
-		// A 304 refreshes the representation the cache already holds: no bytes
-		// change, no quota is spent, and the age restarts.
+		// Refresh only if the generation is still current. The atomic check
+		// closes the race between a separate Version check and this insertion.
 		refreshed := *old
 		refreshed.CachedAt = time.Now()
 		if tag == "" {
 			refreshed.ETag = old.ETag
 		}
-		h.cache.SetVersion(&refreshed, version)
+		if !h.cache.SetVersion(&refreshed, version) {
+			return &protocol.Response{Stderr: []byte("ghx: cached list invalidated during revalidation; retry explicitly\n"), ExitCode: 1}
+		}
 		status = metrics.ResultRevalidated
 		body = old.Stdout
 	} else if response.StatusCode == http.StatusOK {
