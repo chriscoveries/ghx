@@ -181,6 +181,9 @@ func TestHandlerCacheByteBudget(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Reuse a retained public response as a size stimulus; assigning it to
+	// stderr is a mechanism control, not a captured stderr observation.
+	response := string(captured(t, "pr21"))
 	for _, tt := range []struct {
 		name     string
 		stdout   string
@@ -191,6 +194,8 @@ func TestHandlerCacheByteBudget(t *testing.T) {
 		{name: "exact limit", stdout: "out", stderr: "err", retained: true},
 		{name: "oversized stdout", stdout: "toolong", exitCode: 1},
 		{name: "oversized stderr", stderr: "toolong", exitCode: 2},
+		{name: "successful oversized stdout", stdout: response},
+		{name: "successful oversized stderr", stderr: response},
 		{name: "combined overflow", stdout: "data", stderr: "err"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
