@@ -488,21 +488,28 @@ func TestHandlerNoCachePassthroughIsNotStored(t *testing.T) {
 }
 
 func TestHandlerKeyScopeSharesAcrossCheckouts(t *testing.T) {
+	body := captured(t, "repository")
+	// HTTP envelope is a retained issue response used only as a transport
+	// control for these key-scope cases, not as an endpoint observation.
+	httpBody, err := os.ReadFile("../../../testdata/api-throttle/issue140.http")
+	if err != nil {
+		t.Fatal(err)
+	}
 	tests := []struct {
 		name   string
 		args   []string
 		a, b   execctx.ExecContext
 		shared bool
 	}{
-		{"run view across branches", []string{"run", "view", "7"},
+		{"run view remains branch scoped", []string{"run", "view", "7"},
 			execctx.ExecContext{Host: "github.com", Repo: "o/r", Branch: "main"},
-			execctx.ExecContext{Host: "github.com", Repo: "o/r", Branch: "feature"}, true},
+			execctx.ExecContext{Host: "github.com", Repo: "o/r", Branch: "feature"}, false},
 		{"pr view without selector stays per branch", []string{"pr", "view"},
 			execctx.ExecContext{Host: "github.com", Repo: "o/r", Branch: "main"},
 			execctx.ExecContext{Host: "github.com", Repo: "o/r", Branch: "feature"}, false},
-		{"api explicit repo across checkouts", []string{"api", "repos/o/r/actions/runs"},
+		{"conditional api retains checkout scope", []string{"api", "repos/o/r/actions/runs"},
 			execctx.ExecContext{Host: "github.com", Repo: "a/a", Branch: "x"},
-			execctx.ExecContext{Host: "github.com", Repo: "b/b", Branch: "y"}, true},
+			execctx.ExecContext{Host: "github.com", Repo: "b/b", Branch: "y"}, false},
 		{"api placeholder stays per repo", []string{"api", "repos/{owner}/{repo}"},
 			execctx.ExecContext{Host: "github.com", Repo: "a/a"},
 			execctx.ExecContext{Host: "github.com", Repo: "b/b"}, false},
@@ -516,10 +523,16 @@ func TestHandlerKeyScopeSharesAcrossCheckouts(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			h := newTestHandler()
-			h.execute = func(context.Context, string, []string, string, authenv.Environment) *executor.Result {
-				return &executor.Result{Stdout: []byte("ok")}
+			h.execute = func(_ context.Context, _ string, args []string, _ string, _ authenv.Environment) *executor.Result {
+				if len(args) > 0 && args[0] == "api" {
+					return &executor.Result{Stdout: httpBody}
+				}
+				return &executor.Result{Stdout: body}
 			}
 			h.Handle(&protocol.Request{Type: protocol.TypeExec, Args: tt.args, Context: tt.a})
+			if h.cache.Size() != 1 {
+				t.Fatal("first retained control was not cached")
+			}
 			got := h.Handle(&protocol.Request{Type: protocol.TypeExec, Args: tt.args, Context: tt.b})
 			if got.Cached != tt.shared {
 				t.Fatalf("cached = %v, want %v", got.Cached, tt.shared)
@@ -553,18 +566,18 @@ func TestHandlerLifetimeTTLs(t *testing.T) {
 		ttlFlag  int
 		want     time.Duration
 	}{
-		{"sha addressed", []string{"api", "repos/o/r/commits/" + sha}, `{"sha":"x"}`, 0, false, 0, time.Hour},
-		{"sha addressed failure", []string{"api", "repos/o/r/commits/" + sha}, `{}`, 1, false, 0, 30 * time.Second},
+		{"sha addressed", []string{"api", "repos/o/r/commits/" + sha, "--jq", "."}, `{"sha":"x"}`, 0, false, 0, time.Hour},
+		{"sha addressed failure", []string{"api", "repos/o/r/commits/" + sha, "--jq", "."}, `{}`, 1, false, 0, 0},
 		{"completed run", []string{"run", "view", "9", "--json", "status"}, `{"status":"completed"}`, 0, false, 0, 10 * time.Minute},
-		{"in-progress run", []string{"run", "view", "9", "--json", "status"}, `{"status":"in_progress"}`, 0, false, 0, 30 * time.Second},
-		{"completed job via api", []string{"api", "repos/o/r/actions/jobs/1"}, `{"status":"completed","conclusion":"success"}`, 0, false, 0, 10 * time.Minute},
-		{"config override wins", []string{"run", "view", "9", "--json", "status"}, `{"status":"completed"}`, 0, true, 0, 5 * time.Second},
+		{"in-progress run", []string{"run", "view", "9", "--json", "status"}, `{"status":"in_progress"}`, 0, false, 0, 5 * time.Minute},
+		{"completed job via api", []string{"api", "repos/o/r/actions/jobs/1", "--jq", "."}, `{"status":"completed","conclusion":"success"}`, 0, false, 0, 10 * time.Minute},
+		{"config override wins", []string{"run", "view", "9", "--json", "status"}, `{"status":"completed"}`, 0, true, 0, 5 * time.Minute},
 		{"request ttl wins", []string{"run", "view", "9", "--json", "status"}, `{"status":"completed"}`, 0, false, 3, 3 * time.Second},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			h := newTestHandler()
-			h.cfg.ImmutableTTL, h.cfg.SettledTTL = time.Hour, 10*time.Minute
+			h.cfg.UpImmutableTTL, h.cfg.SettledTTL = time.Hour, 10*time.Minute
 			h.cfg.TTLOverrides = map[string]time.Duration{}
 			if tt.override {
 				h.cfg.TTLOverrides["run_view"] = 5 * time.Second
@@ -574,6 +587,12 @@ func TestHandlerLifetimeTTLs(t *testing.T) {
 			}
 			h.Handle(&protocol.Request{Type: protocol.TypeExec, Args: tt.args, TTLOverride: tt.ttlFlag})
 			keys := h.cache.Keys()
+			if tt.exitCode != 0 {
+				if len(keys) != 0 {
+					t.Fatalf("failed result was retained: %v", keys)
+				}
+				return
+			}
 			if len(keys) != 1 {
 				t.Fatalf("keys = %v", keys)
 			}
@@ -672,13 +691,14 @@ func TestHandlerJQFallsBackToGH(t *testing.T) {
 func TestHandlerAPIJQSharesResponse(t *testing.T) {
 	h := newTestHandler()
 	calls := 0
+	body := captured(t, "repository")
 	h.execute = func(_ context.Context, _ string, args []string, _ string, _ authenv.Environment) *executor.Result {
 		calls++
-		return &executor.Result{Stdout: []byte(`{"id":5,"name":"x","tags":["a"]}`)}
+		return &executor.Result{Stdout: body}
 	}
 	ctx := execctx.ExecContext{Host: "github.com", Repo: "o/r"}
-	for _, tc := range []struct{ jq, want string }{{".id", "5\n"}, {".name", "x\n"}, {".tags", `["a"]` + "\n"}} {
-		got := h.Handle(&protocol.Request{Type: protocol.TypeExec, Args: []string{"api", "repos/o/r", "--jq", tc.jq}, Context: ctx, NoCache: tc.jq == ".id"})
+	for _, tc := range []struct{ jq, want string }{{".id", "1211583246\n"}, {".name", "ghx\n"}, {".private", "false\n"}} {
+		got := h.Handle(&protocol.Request{Type: protocol.TypeExec, Args: []string{"api", "repos/o/r", "--jq", tc.jq}, Context: ctx})
 		if string(got.Stdout) != tc.want {
 			t.Fatalf("jq %s = %q, want %q", tc.jq, got.Stdout, tc.want)
 		}
@@ -705,8 +725,8 @@ func TestHandlerLogsRedactedArgsWhenEnabled(t *testing.T) {
 	if got := strings.Join(log[0].Args, " "); got != "--no-cache api repos/o/r -H Authorization: [REDACTED] --jq .a" {
 		t.Errorf("args = %q", got)
 	}
-	if got := strings.Join(log[0].Fetch, " "); got != "api repos/o/r -H Authorization: [REDACTED]" {
-		t.Errorf("fetch = %q", got)
+	if log[0].Fetch != nil {
+		t.Errorf("direct no-cache call must not claim a normalized fetch: %q", log[0].Fetch)
 	}
 	if log[1].Fetch != nil {
 		t.Errorf("fetch should be omitted when unchanged: %q", log[1].Fetch)

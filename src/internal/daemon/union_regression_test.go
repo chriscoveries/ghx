@@ -197,6 +197,33 @@ func TestUnionCacheAdmissionPreservesForkExitRules(t *testing.T) {
 	}
 }
 
+func TestUnionExplicitOtherHostBypassesSharedCache(t *testing.T) {
+	// Host selectors and response order are mechanism controls; the two
+	// bodies are separately retained observations, not enterprise responses.
+	before, after := captured(t, "pr21"), captured(t, "pr22")
+	for _, args := range [][]string{
+		{"pr", "view", "21", "-R", "enterprise.example/owner/repo"},
+		{"pr", "view", "https://enterprise.example/owner/repo/pull/21"},
+		{"api", "--hostname", "enterprise.example", "repos/owner/repo"},
+	} {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			h := newTestHandler()
+			var calls atomic.Int32
+			h.execute = func(context.Context, string, []string, string, authenv.Environment) *executor.Result {
+				if calls.Add(1) == 1 {
+					return &executor.Result{Stdout: before}
+				}
+				return &executor.Result{Stdout: after}
+			}
+			req := &protocol.Request{Args: args, Context: execctx.ExecContext{Host: "github.com", Repo: "brunoborges/ghx", TokenHash: "default-host-identity"}}
+			first, second := h.Handle(req), h.Handle(req)
+			if first.Cached || second.Cached || !bytes.Equal(first.Stdout, before) || !bytes.Equal(second.Stdout, after) || calls.Load() != 2 || h.cache.Size() != 0 {
+				t.Fatal("unbound target-host credential used the shared cache")
+			}
+		})
+	}
+}
+
 func TestUnionConditionalListInvalidationRefusesWithoutFallback(t *testing.T) {
 	h := newTestHandler()
 	h.cfg.ResourceViews = true

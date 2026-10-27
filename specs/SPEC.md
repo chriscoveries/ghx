@@ -60,7 +60,7 @@ CacheKey = hash(
 
 **Output filters**: `--jq` is applied by the daemon (gojq, matching gh's formatting) to the cached unfiltered response, so different filters over the same data share one entry. A `--json` request for a subset of fields already cached for the same command is projected from that entry. Filter errors and non-zero exits rerun the original command directly.
 
-**Lifetimes**: commit-SHA-addressed API content uses `immutable_ttl` (1h); `run view <id>` and Actions run/job API responses reporting `"status":"completed"` use `settled_ttl` (10m).
+**Lifetimes**: commit-SHA-addressed API content uses `up_immutable_ttl` (1h); `run view <id>` and Actions run/job API responses reporting `"status":"completed"` use `settled_ttl` (10m).
 
 **Context resolution**: The client (`ghx`) resolves the execution context before sending to the daemon:
 - Repo: `git remote get-url origin` or `GH_REPO` env var
@@ -318,7 +318,7 @@ ttl_overrides:
   api_get: 30s
 
 # Longer lifetimes for data that can't go stale
-immutable_ttl: 1h   # commit-SHA-addressed API content
+up_immutable_ttl: 1h   # commit-SHA-addressed API content
 settled_ttl: 10m    # runs/jobs reporting status "completed"
 
 # Cache limits

@@ -160,7 +160,7 @@ func TestLifetimeTTLDefaults(t *testing.T) {
 	if cfg.LogArgs {
 		t.Error("LogArgs must be off by default")
 	}
-	if cfg.ImmutableTTL != time.Hour || cfg.SettledTTL != 10*time.Minute {
-		t.Fatalf("ImmutableTTL=%v SettledTTL=%v", cfg.ImmutableTTL, cfg.SettledTTL)
+	if cfg.ImmutableTTL != 24*time.Hour || cfg.UpImmutableTTL != time.Hour || cfg.SettledTTL != 10*time.Minute {
+		t.Fatalf("ImmutableTTL=%v UpImmutableTTL=%v SettledTTL=%v", cfg.ImmutableTTL, cfg.UpImmutableTTL, cfg.SettledTTL)
 	}
 }

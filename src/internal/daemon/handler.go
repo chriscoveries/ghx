@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -127,6 +128,16 @@ func (h *Handler) handleExec(req *protocol.Request) *protocol.Response {
 	if cmdKey == "" {
 		cmdKey = sanitizeCmdKey(req.Args)
 	}
+	// The client fingerprint identifies its default host credential. An
+	// explicit different host may use another credential, so do not share or
+	// populate cache entries when that effective identity is unbound.
+	defaultHost, _ := resource.Repository(req.Context.Host, req.Context.Repo)
+	targetHost := resource.Identify(req.Context, req.Args).Host
+	if classification.Type == allowlist.Cacheable && !strings.EqualFold(targetHost, defaultHost) {
+		result := h.execGH(req.Args, req.WorkDir, req.AuthEnv)
+		h.record(req, nil, cmdKey, "", metrics.ResultPassthrough, time.Since(start).Seconds()*1000)
+		return &protocol.Response{Stdout: result.Stdout, Stderr: result.Stderr, ExitCode: result.ExitCode}
+	}
 	if h.cfg.ResourceViews && !req.NoCache && classification.Type == allowlist.Cacheable {
 		if shape := resource.Prepare(req.Context, req.Args); shape != nil {
 			// Native fallbacks are exact-key cached. Reuse them before another
@@ -160,7 +171,7 @@ func (h *Handler) handleExec(req *protocol.Request) *protocol.Response {
 	if classification.Type == allowlist.Passthrough || (req.NoCache && classification.Type != allowlist.Mutation) {
 		result := h.execGH(req.Args, req.WorkDir, req.AuthEnv)
 		latency := time.Since(start).Seconds() * 1000
-		h.stats.Record(cmdKey, "", metrics.ResultPassthrough, latency)
+		h.record(req, nil, cmdKey, "", metrics.ResultPassthrough, latency)
 
 		return &protocol.Response{
 			Stdout:   result.Stdout,
@@ -366,8 +377,8 @@ func (h *Handler) store(cacheKey, cmdKey string, classification allowlist.Classi
 	if req.TTLOverride > 0 {
 		ttl = time.Duration(req.TTLOverride) * time.Second
 	} else if _, overridden := h.cfg.TTLOverrides[cmdKey]; !overridden && result.ExitCode == 0 {
-		if classification.Immutable && h.cfg.ImmutableTTL > ttl {
-			ttl = h.cfg.ImmutableTTL
+		if classification.Immutable && h.cfg.UpImmutableTTL > ttl {
+			ttl = h.cfg.UpImmutableTTL
 		} else if classification.Settles && h.cfg.SettledTTL > ttl && reportsCompleted(result.Stdout) {
 			ttl = h.cfg.SettledTTL
 		}

@@ -277,7 +277,7 @@ If a filter fails, or the command exits non-zero, ghx runs the original command 
 
 Some responses can't go stale, so they are kept longer than the regular TTL (unless a `--ttl` or `ttl_overrides` entry applies):
 
-- **Commit-addressed content** — `api repos/o/r/commits/<sha>`, `git/commits|trees|blobs/<sha>`: `immutable_ttl` (default 1h)
+- **Commit-addressed content** — `api repos/o/r/commits/<sha>`, `git/commits|trees|blobs/<sha>`: `up_immutable_ttl` (default 1h)
 - **Completed runs and jobs** — `run view <id>` and `api repos/o/r/actions/runs|jobs/<id>` once they report `"status":"completed"`: `settled_ttl` (default 10m)
 
 #### Singleflight coalescing
@@ -518,7 +518,7 @@ ttl_overrides:
   run_list: 15s
 
 # TTL for commit-SHA-addressed API content (default: 1h)
-immutable_ttl: 1h
+up_immutable_ttl: 1h
 
 # TTL for runs/jobs that report status "completed" (default: 10m)
 settled_ttl: 10m
