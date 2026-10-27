@@ -3,26 +3,32 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
 )
 
 type Config struct {
-	CacheFile       string                   `yaml:"cache_file"`
-	ResourceViews   bool                     `yaml:"resource_views"`
-	ImmutableTTL    time.Duration            `yaml:"immutable_ttl"`
-	TTL             time.Duration            `yaml:"ttl"`
-	TTLOverrides    map[string]time.Duration `yaml:"ttl_overrides"`
-	MaxCacheBytes   int64                    `yaml:"max_cache_bytes"`
-	MaxCacheEntries int                      `yaml:"max_cache_entries"`
-	SocketPath      string                   `yaml:"socket_path"`
-	PIDFile         string                   `yaml:"pid_file"`
-	AutoStart       bool                     `yaml:"auto_start"`
-	AdditionalCache []string                 `yaml:"additional_cacheable"`
-	DashboardPort   int                      `yaml:"dashboard_port"`
-	GHPath          string                   `yaml:"gh_path"`
-	LogFile         string                   `yaml:"log_file"`
+	CacheFile     string                   `yaml:"cache_file"`
+	ResourceViews bool                     `yaml:"resource_views"`
+	ImmutableTTL  time.Duration            `yaml:"immutable_ttl"`
+	TTL           time.Duration            `yaml:"ttl"`
+	TTLOverrides  map[string]time.Duration `yaml:"ttl_overrides"`
+	// upstream's immutable_ttl/settled_ttl fields are a distinct, newer
+	// naming; both sides' yaml keys coexist (different key names)
+	UpImmutableTTL  time.Duration `yaml:"up_immutable_ttl"`
+	SettledTTL      time.Duration `yaml:"settled_ttl"` // specific runs/jobs reporting status "completed"
+	MaxCacheBytes   int64         `yaml:"max_cache_bytes"`
+	MaxCacheEntries int           `yaml:"max_cache_entries"`
+	SocketPath      string        `yaml:"socket_path"`
+	PIDFile         string        `yaml:"pid_file"`
+	AutoStart       bool          `yaml:"auto_start"`
+	AdditionalCache []string      `yaml:"additional_cacheable"`
+	DashboardPort   int           `yaml:"dashboard_port"`
+	GHPath          string        `yaml:"gh_path"`
+	LogFile         string        `yaml:"log_file"`
+	LogArgs         bool          `yaml:"log_args"` // keep redacted command arguments in the in-memory request log
 }
 
 func DefaultConfig() *Config {
@@ -32,6 +38,8 @@ func DefaultConfig() *Config {
 		ImmutableTTL:    24 * time.Hour,
 		TTL:             5 * time.Minute,
 		TTLOverrides:    make(map[string]time.Duration),
+		UpImmutableTTL:  time.Hour,
+		SettledTTL:      10 * time.Minute,
 		MaxCacheEntries: 1000,
 		MaxCacheBytes:   64 << 20,
 		SocketPath:      defaultSocketPath(ghxDir),
@@ -49,15 +57,13 @@ func Load() (*Config, error) {
 	ghxDir := defaultGHXDir()
 	configPath := filepath.Join(ghxDir, "config.yaml")
 	data, err := os.ReadFile(configPath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return cfg, nil
-		}
+	if err != nil && !os.IsNotExist(err) {
 		return cfg, err
 	}
-
-	if err := yaml.Unmarshal(data, cfg); err != nil {
-		return cfg, err
+	if err == nil {
+		if err := yaml.Unmarshal(data, cfg); err != nil {
+			return cfg, err
+		}
 	}
 
 	// Apply env var overrides
@@ -73,6 +79,9 @@ func Load() (*Config, error) {
 	}
 	if v := os.Getenv("GHX_GH_PATH"); v != "" {
 		cfg.GHPath = v
+	}
+	if v := os.Getenv("GHX_LOG_ARGS"); v != "" {
+		cfg.LogArgs = v == "1" || strings.EqualFold(v, "true")
 	}
 
 	return cfg, nil

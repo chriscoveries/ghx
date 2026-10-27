@@ -11,7 +11,7 @@ The GitHub CLI (`gh`) has no client-side caching. When multiple AI agents (Copil
 - **`ghxd`** — a background daemon that executes `gh` commands, caches results, and serves cached responses
 - **`ghx`** — a thin CLI client that forwards commands to the daemon and returns results
 
-The system uses an **allowlist** of known-safe read-only commands, **request coalescing** to prevent duplicate in-flight calls, and a **configurable TTL** (default: 30s). Commands not on the allowlist are passed through directly to `gh` without caching.
+The system uses an **allowlist** of known-safe read-only commands, **request coalescing** to prevent duplicate in-flight calls, and a **configurable TTL** (default and configured minimum: 5m). A positive per-call `--ttl` is a separate request override. Commands not on the allowlist are passed through directly to `gh` without caching.
 
 ## Architecture
 
@@ -50,14 +50,17 @@ A cache key is a composite of the **full execution context**, not just command a
 
 ```
 CacheKey = hash(
-    gh_command,          // normalized: sorted flags, resolved args
+    gh_command,          // args without --jq, with --json fields sorted
     resolved_host,       // github.com or GHE hostname
-    resolved_repo,       // owner/name (from CWD or GH_REPO)
-    resolved_branch,     // current branch (when command depends on it)
+    resolved_repo,       // owner/name (from CWD or GH_REPO; -R or the API path when given; omitted for repo-independent commands)
+    resolved_branch,     // current branch (only when the output depends on it)
     auth_token_hash,     // SHA256 of token (not the token itself)
-    output_format,       // --json fields, --jq, --template, or default
 )
 ```
+
+**Output filters**: `--jq` is applied by the daemon (gojq, matching gh's formatting) to the cached unfiltered response, so different filters over the same data share one entry. A `--json` request for a subset of fields already cached for the same command is projected from that entry. Filter errors and non-zero exits rerun the original command directly.
+
+**Lifetimes**: commit-SHA-addressed API content uses `up_immutable_ttl` (1h); `run view <id>` and Actions run/job API responses reporting `"status":"completed"` use `settled_ttl` (10m).
 
 **Context resolution**: The client (`ghx`) resolves the execution context before sending to the daemon:
 - Repo: `git remote get-url origin` or `GH_REPO` env var
@@ -136,13 +139,7 @@ All three agents get the same response
 
 ### Cache Invalidation
 
-**Coarse-grained, namespace-based invalidation.** After any mutating command passes through the daemon, all cached entries for the same `{host, repo, resource_type}` namespace are invalidated.
-
-Resource types: `pr`, `issue`, `run`, `workflow`, `release`, `label`, `repo`, `api`.
-
-Example: After `gh pr merge #42`, all cached entries tagged `{github.com, owner/repo, pr}` are evicted.
-
-This is intentionally conservative — it may over-invalidate, but it will never serve stale data after mutations.
+After any mutating command exits in the invoking client, a flush request invalidates all in-memory cached entries. This conservative scope avoids guessing which host or repository native gh selected, at the cost of evicting unrelated entries. The optional persistent snapshot has a separate unresolved mutation/restart issue; keep `cache_file` unset.
 
 ### Cached Response Format
 
@@ -202,7 +199,7 @@ ghx ghcli upgrade            # Download the latest GitHub CLI to ~/.ghx/bin/gh
 ### Per-Command Overrides
 
 ```bash
-ghx --no-cache pr list            # Bypass cache for this call
+ghx --no-cache pr list            # Bypass the cache for this call
 ghx --ttl 120 pr list             # Override TTL for this call
 GHX_TTL=120 ghx pr list           # Same, via env var
 GHX_NO_CACHE=1 ghx pr list        # Same as --no-cache, via env var
@@ -233,10 +230,7 @@ On SIGTERM/SIGINT: stop accepting new connections, wait for in-flight requests (
 
 ### In-Memory Cache
 
-Cache is in-memory only. Lost on daemon restart. This is acceptable because:
-- TTLs are short (30s default)
-- Daemon restarts are rare
-- Disk-based caching adds complexity without proportional benefit for this use case
+The cache is in memory by default. On Unix, an explicitly configured `cache_file` also enables a persisted snapshot; leave that option unset while its mutation/restart coherence is unresolved.
 
 ### LRU Eviction
 
@@ -284,17 +278,19 @@ A single self-contained HTML page (embedded in the Go binary via `embed`) with n
 
 **Dashboard sections:**
 
-1. **Overview** — real-time hit rate %, total requests, cache size, daemon uptime
+1. **Overview** — real-time hit rate %, total requests, cache size, daemon uptime, and daemon version (shown next to the title)
 2. **Per-Command Breakdown** — sortable table showing each command with hit count, miss count, hit rate, and average latency
-3. **Request Log** — scrollable live tail of recent requests (last 200) showing timestamp, command, cache hit/miss, and latency
+3. **Request Log** — scrollable live tail of recent requests (last 200) showing timestamp, command, cache hit/miss, and latency. With `log_args: true`, also shows the full redacted arguments and the normalized fetch command
 4. **TTL Analysis** — for each command, shows the median time between repeated identical requests, helping users pick the right TTL
 
 **JSON API** (consumed by the dashboard, also useful for scripting):
 
 ```
 GET /api/stats          → { uptime, total, hits, misses, passthrough, coalesced, cache_size, commands: [...] }
-GET /api/log?limit=200  → [ { timestamp, command, cache_result, latency_ms }, ... ]
+GET /api/log?limit=200  → [ { timestamp, command, cache_key, result, latency_ms, args?, fetch? }, ... ]
 ```
+
+`args`/`fetch` are present only when `log_args` is enabled. The HTTP server rejects requests whose `Host` is not loopback, emits no CORS headers, and rejects non-GET requests with a cross-site `Origin`.
 
 ## Configuration File
 
@@ -302,15 +298,19 @@ Location: `~/.ghx/config.yaml` (Unix) or `%LOCALAPPDATA%\ghx\config.yaml` (Windo
 
 ```yaml
 # Default TTL for all cached commands
-ttl: 30s
+ttl: 5m
 
 # Per-command TTL overrides
 ttl_overrides:
-  pr_list: 60s
-  pr_view: 30s
-  issue_list: 60s
-  run_list: 15s
-  api_get: 30s
+  pr_list: 5m
+  pr_view: 5m
+  issue_list: 5m
+  run_list: 5m
+  api_get: 5m
+
+# Longer lifetimes for data that can't go stale
+up_immutable_ttl: 1h   # commit-SHA-addressed API content
+settled_ttl: 10m    # runs/jobs reporting status "completed"
 
 # Cache limits
 max_cache_entries: 1000
@@ -333,6 +333,9 @@ gh_path: /opt/homebrew/bin/gh
 
 # Logging
 log_file: ~/.ghx/ghxd.log
+
+# Show full (redacted) command args in the dashboard request log (env: GHX_LOG_ARGS)
+log_args: false
 ```
 
 ## GitHub CLI Resolution and Auto-Download
@@ -411,15 +414,15 @@ Staleness checks only apply to the managed binary. If `gh` was found in PATH or 
 2. **No token storage**: The daemon never stores auth tokens; it delegates to `gh` which manages its own auth. Only a SHA256 fingerprint of the token is used in cache keys
 3. **No cross-user sharing**: Each user runs their own daemon with their own cache
 4. **Cached data**: Responses may contain private repo data. The in-memory cache is ephemeral and protected by socket permissions
-5. **Dashboard binding**: Metrics/dashboard HTTP server binds to `127.0.0.1` only
-6. **Log hygiene**: Command arguments are logged, but response bodies are not logged by default
+5. **Dashboard binding**: Metrics/dashboard HTTP server binds to `127.0.0.1` only, rejects non-loopback `Host` headers (DNS rebinding), sends no CORS headers, and rejects cross-site `Origin` on POST endpoints
+6. **Log hygiene**: Response bodies are never logged. Full command arguments are recorded in the in-memory request log only when `log_args` is enabled, and are redacted first (header values, request bodies, sensitive `-f` fields, token/JWT patterns)
 
 ## Error Handling
 
 - **Daemon unavailable**: Auto-start the daemon, then retry. If auto-start itself fails (e.g., socket conflict, permissions), fall back to executing `gh` directly (never block the user)
-- **`gh` execution error**: Cache the error response too (exit code, stderr) for the TTL duration to avoid hammering a failing endpoint
+- **`gh` execution error**: Do not cache failed results, except the existing pending `pr checks` exit status 8.
 - **Socket timeout**: 5-second timeout on client→daemon communication; fall back to direct `gh` on timeout
-- **Cache corruption**: In-memory only, so restart the daemon to clear
+- **Cache corruption**: Restart clears the default in-memory cache. A configured persistent snapshot requires separate custody and recovery.
 
 ## Project Structure
 
@@ -500,9 +503,9 @@ ghx/
 - `ghx` client and `ghxd` daemon
 - IPC via Unix domain sockets (macOS/Linux) and named pipes (Windows)
 - Allowlisted command caching with context-aware keys
-- Configurable TTL (default 30s)
+- Configurable TTL (default and configured minimum 5m)
 - Singleflight request coalescing (inline in handler)
-- Coarse-grained invalidation after mutations
+- Global in-memory invalidation after mutations
 - Auto-start daemon, fallback to direct `gh` on failure
 - `ghx xcache stats` for CLI metrics
 - `ghx xdaemon start/stop/status`

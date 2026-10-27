@@ -98,6 +98,10 @@ func TestAPIMethodParsing(t *testing.T) {
 		{[]string{"api", "graphql", "-f", "query=mutation{}"}, "GRAPHQL", false},
 		{[]string{"api", "repos/o/r", "-H", "If-None-Match: tag"}, "GET", false},
 		{[]string{"api", "repos/o/r", "--paginate"}, "GET", false},
+		{[]string{"api", "-iXGET", "repos/owner/repo"}, "GET", false},
+		{[]string{"api", "-iXPOST", "repos/owner/repo"}, "POST", false},
+		{[]string{"api", "-XGET", "--", "repos/owner/repo"}, "GET", false},
+		{[]string{"api", "--", "--method=POST"}, "GET", false},
 	}
 	for _, c := range cases {
 		a := ParseAPI(c.args)
@@ -107,6 +111,9 @@ func TestAPIMethodParsing(t *testing.T) {
 	}
 	if ParseAPI([]string{"api", "repos/o/r", "-X"}).Valid {
 		t.Fatal("missing method value accepted")
+	}
+	if ParseAPI([]string{"api", "--", "repos/owner/repo", "extra"}).Valid {
+		t.Fatal("multiple operands after terminator accepted")
 	}
 }
 func TestDependencyIdentity(t *testing.T) {

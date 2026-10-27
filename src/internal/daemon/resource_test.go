@@ -47,7 +47,7 @@ func resourceHandler(t *testing.T) (*Handler, []byte, *atomic.Int32) {
 	return h, body, calls
 }
 func view(fields string) *protocol.Request {
-	return &protocol.Request{Args: []string{"pr", "view", "21", "--json", fields}, Context: execctx.ExecContext{Host: "github.com", Repo: "brunoborges/ghx", Branch: "one", TokenHash: "identity"}}
+	return &protocol.Request{Args: []string{"pr", "view", "21", "--json", fields}, Context: execctx.ExecContext{RepoBound: true, Host: "github.com", Repo: "brunoborges/ghx", Branch: "one", TokenHash: "identity"}}
 }
 func expire(t *testing.T, h *Handler, key string, age time.Duration) {
 	t.Helper()
@@ -136,7 +136,7 @@ func TestResourceSingleflightProjectsEachWaiter(t *testing.T) {
 		}
 	}
 }
-func TestPreciseWriteInvalidation(t *testing.T) {
+func TestWriteInvalidationClearsAllScopes(t *testing.T) {
 	for _, args := range [][]string{
 		{"pr", "edit", "21", "--repo", "brunoborges/ghx"},
 		{"pr", "comment", "https://github.com/brunoborges/ghx/pull/21"},
@@ -157,21 +157,42 @@ func TestPreciseWriteInvalidation(t *testing.T) {
 			req.Context.Repo = "default/repo"
 			req.NoCache = true
 			h.Handle(req)
-			for _, key := range []string{"target", "list", "issue-comments"} {
+			for _, key := range []string{"target", "list", "issue-comments", "other-object", "other-repo"} {
 				if h.cache.Peek(key) != nil {
 					t.Errorf("write retained %s", key)
-				}
-			}
-			for _, key := range []string{"other-object", "other-repo"} {
-				if h.cache.Peek(key) == nil {
-					t.Errorf("write evicted %s", key)
 				}
 			}
 		})
 	}
 }
-func TestFailedWriteRetainsCacheAndCreateOnlyEvictsCollections(t *testing.T) {
-	h, _, _ := resourceHandler(t)
+
+func TestStructuredMutationFlushClearsAllScopes(t *testing.T) {
+	h, body, _ := resourceHandler(t)
+	request := view("number")
+	h.Handle(request)
+	shape := resource.Prepare(request.Context, request.Args)
+	key := execctx.CacheKey(shape.Context, shape.Args)
+	// Reuse the retained response bytes; resource metadata is a dependency
+	// control and does not claim these were separately observed endpoints.
+	for _, entry := range []cache.Entry{
+		{Key: "related-issue", Host: shape.Context.Host, Repo: shape.Context.Repo, Resource: allowlist.ResourceIssue, ResourceID: shape.ID},
+		{Key: "search", Host: shape.Context.Host, Resource: allowlist.ResourceSearch},
+		{Key: "other-object", Host: shape.Context.Host, Repo: shape.Context.Repo, Resource: allowlist.ResourcePR, ResourceID: "22"},
+	} {
+		entry.Stdout, entry.CachedAt, entry.TTL = body, time.Now(), time.Hour
+		h.cache.Set(&entry)
+	}
+	identity := resource.Identify(request.Context, []string{"pr", "edit", "21"})
+	h.Handle(&protocol.Request{Type: protocol.TypeFlush, Dependency: &identity, Context: execctx.ExecContext{RepoBound: true}})
+	for _, removed := range []string{key, "related-issue", "search", "other-object"} {
+		if h.cache.Peek(removed) != nil {
+			t.Errorf("mutation flush retained dependent entry %s", removed)
+		}
+	}
+}
+
+func TestFailedWriteAndCreateInvalidateAllScopes(t *testing.T) {
+	h, body, _ := resourceHandler(t)
 	h.Handle(view("number"))
 	req := view("number")
 	req.Args = []string{"pr", "edit", "21"}
@@ -179,17 +200,21 @@ func TestFailedWriteRetainsCacheAndCreateOnlyEvictsCollections(t *testing.T) {
 		return &executor.Result{ExitCode: 1}
 	}
 	h.Handle(req)
-	if !h.Handle(view("number")).Cached {
-		t.Fatal("failed write evicted state")
+	if h.Handle(view("number")).Cached {
+		t.Fatal("failed write left potentially stale state")
 	}
-	h.execute = func(context.Context, string, []string, string, authenv.Environment) *executor.Result {
+	h.execute = func(_ context.Context, _ string, args []string, _ string, _ authenv.Environment) *executor.Result {
+		if len(args) > 1 && args[0] == "pr" && args[1] == "view" {
+			return &executor.Result{Stdout: body}
+		}
 		return &executor.Result{}
 	}
+	h.Handle(view("number"))
 	h.cache.Set(&cache.Entry{Key: "list", Host: req.Context.Host, Repo: req.Context.Repo, Resource: allowlist.ResourcePR, TTL: time.Hour, CachedAt: time.Now()})
 	req.Args = []string{"pr", "create"}
 	h.Handle(req)
-	if h.cache.Peek("list") != nil || !h.Handle(view("number")).Cached {
-		t.Fatal("create did not preserve existing objects while evicting collections")
+	if h.cache.Peek("list") != nil || h.Handle(view("number")).Cached {
+		t.Fatal("create left cached entries after its global invalidation")
 	}
 }
 func TestReadBeforeWriteCannotRefillOrBeJoinedAfterWrite(t *testing.T) {
@@ -242,7 +267,7 @@ func httpOutput(body []byte, status int, etag string) []byte {
 func TestConditionalGETReuses304AndReplacesChangedBodies(t *testing.T) {
 	h := newTestHandler()
 	body := captured(t, "repository")
-	req := &protocol.Request{Args: []string{"api", "repos/brunoborges/ghx"}, Context: execctx.ExecContext{Host: "github.com", Repo: "brunoborges/ghx", TokenHash: "identity"}}
+	req := &protocol.Request{Args: []string{"api", "repos/brunoborges/ghx"}, Context: execctx.ExecContext{RepoBound: true, Host: "github.com", Repo: "brunoborges/ghx", TokenHash: "identity"}}
 	key := execctx.CacheKey(req.Context, req.Args)
 	calls := 0
 	h.execute = func(_ context.Context, _ string, args []string, _ string, _ authenv.Environment) *executor.Result {
@@ -282,7 +307,7 @@ func TestConditionalGETReuses304AndReplacesChangedBodies(t *testing.T) {
 }
 func TestConditionalFailureDoesNotCacheOrReplaceValidator(t *testing.T) {
 	h := newTestHandler()
-	req := &protocol.Request{Args: []string{"api", "repos/brunoborges/ghx"}, Context: execctx.ExecContext{Host: "github.com"}}
+	req := &protocol.Request{Args: []string{"api", "repos/brunoborges/ghx"}, Context: execctx.ExecContext{RepoBound: true, Host: "github.com", TokenHash: "fixture-identity"}}
 	body := captured(t, "repository")
 	key := execctx.CacheKey(req.Context, req.Args)
 	h.cache.Set(&cache.Entry{Key: key, Stdout: body, ETag: `"old"`, TTL: time.Second, CachedAt: time.Now().Add(-time.Minute)})
@@ -313,7 +338,7 @@ func TestCapturedWorkloadReplay(t *testing.T) {
 	beforeHits, beforeCalls := run(false)
 	afterHits, afterCalls := run(true)
 	t.Logf("captured workload: calls=%d; before hits=%d upstream=%d; after hits=%d upstream=%d", len(fields), beforeHits, beforeCalls, afterHits, afterCalls)
-	if beforeHits != 0 || beforeCalls != 10 || afterHits != 9 || afterCalls != 1 {
+	if beforeHits != 1 || beforeCalls != 9 || afterHits != 9 || afterCalls != 1 {
 		t.Fatal("resource workload hit rate regressed")
 	}
 }

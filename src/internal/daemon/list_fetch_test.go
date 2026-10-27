@@ -49,7 +49,7 @@ func TestConditionalListRevalidatesAnExpiredBody(t *testing.T) {
 	}
 	req := &protocol.Request{
 		Args:    []string{"run", "list", "--json", "databaseId,status,conclusion", "-L", "1"},
-		Context: execctx.ExecContext{Host: "github.com", Repo: "chriscoveries/cifast", TokenHash: "identity"},
+		Context: execctx.ExecContext{RepoBound: true, Host: "github.com", Repo: "chriscoveries/cifast", TokenHash: "identity"},
 	}
 	first := h.Handle(req)
 	if first.Cached {
@@ -99,7 +99,7 @@ func TestConditionalListRevalidatesAnExpiredBody(t *testing.T) {
 }
 
 func TestConditionalListFallsBackForUnmappedFilters(t *testing.T) {
-	shape := resource.PrepareList(execctx.ExecContext{Host: "github.com", Repo: "chriscoveries/cifast"}, []string{"run", "list", "--json", "databaseId", "--user", "someone"})
+	shape := resource.PrepareList(execctx.ExecContext{RepoBound: true, Host: "github.com", Repo: "chriscoveries/cifast", TokenHash: "fixture-identity"}, []string{"run", "list", "--json", "databaseId", "--user", "someone"})
 	if shape == nil {
 		t.Fatal("shape expected")
 	}

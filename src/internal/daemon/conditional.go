@@ -63,7 +63,10 @@ func (h *Handler) refreshConditional(req *protocol.Request, key string, start ti
 			tag = ""
 		}
 		if response.StatusCode == http.StatusNotModified {
-			if old == nil || old.ETag == "" || version != h.cache.Version() {
+			if r.ExitCode != 0 && r.ExitCode != 1 {
+				return r
+			}
+			if old == nil || old.ETag == "" {
 				return h.execGH(req.Args, req.WorkDir, req.AuthEnv)
 			}
 			body = old.Stdout
@@ -71,12 +74,17 @@ func (h *Handler) refreshConditional(req *protocol.Request, key string, start ti
 				tag = old.ETag
 			}
 			r.ExitCode = 0
-			reused = true
 		}
 		r.Stdout = body
 		if r.ExitCode == 0 && (response.StatusCode == http.StatusOK || response.StatusCode == http.StatusNotModified) {
 			d := resource.Identify(req.Context, req.Args)
-			h.cache.SetVersion(&cache.Entry{Key: key, Stdout: body, Stderr: r.Stderr, CachedAt: time.Now(), TTL: h.requestTTL(req, "api_get"), ETag: tag, Host: d.Host, Repo: d.Repo, Resource: allowlist.ResourceType(d.Kind), ResourceID: d.ID}, version)
+			stored := h.cache.SetVersion(&cache.Entry{Key: key, Stdout: body, Stderr: r.Stderr, CachedAt: time.Now(), TTL: h.requestTTL(req, "api_get"), ETag: tag, Host: d.Host, Repo: d.Repo, Resource: allowlist.ResourceType(d.Kind), ResourceID: d.ID}, version)
+			if response.StatusCode == http.StatusNotModified && !stored {
+				return &executor.Result{Stderr: []byte("ghx: cached response invalidated during revalidation; retry explicitly\n"), ExitCode: 1}
+			}
+			if response.StatusCode == http.StatusNotModified {
+				reused = true
+			}
 		}
 		return r
 	})
@@ -87,5 +95,5 @@ func (h *Handler) refreshConditional(req *protocol.Request, key string, start ti
 		status = metrics.ResultRevalidated
 	}
 	h.stats.Record("api_get", key, status, time.Since(start).Seconds()*1000)
-	return &protocol.Response{Stdout: result.Stdout, Stderr: result.Stderr, ExitCode: result.ExitCode, Cached: reused || coalesced}
+	return &protocol.Response{Stdout: result.Stdout, Stderr: result.Stderr, ExitCode: result.ExitCode, Cached: result.ExitCode == 0 && (reused || coalesced)}
 }

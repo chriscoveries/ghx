@@ -14,6 +14,7 @@ type ExecContext struct {
 	Epoch     string `json:"epoch,omitempty"`
 	Host      string `json:"host"`
 	Repo      string `json:"repo"`
+	RepoBound bool   `json:"repo_bound,omitempty"`
 	Branch    string `json:"branch"`
 	TokenHash string `json:"token_hash"`
 }
@@ -37,6 +38,7 @@ func Resolve(ghPath string) ExecContext {
 	// Repo: GH_REPO env var or from git remote
 	if repo := os.Getenv("GH_REPO"); repo != "" {
 		ctx.Repo = repo
+		ctx.RepoBound = true
 	} else {
 		ctx.Repo = resolveRepoFromGit()
 	}
