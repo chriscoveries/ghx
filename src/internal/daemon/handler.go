@@ -44,8 +44,9 @@ type Handler struct {
 }
 
 type call struct {
-	wg  sync.WaitGroup
-	res *executor.Result
+	wg      sync.WaitGroup
+	res     *executor.Result
+	version uint64 // cache generation when the fetch started
 }
 
 func NewHandler(cfg *config.Config, c *cache.Cache, cl *allowlist.Classifier, s *metrics.Stats) *Handler {
@@ -227,7 +228,6 @@ func (h *Handler) handleExec(req *protocol.Request) *protocol.Response {
 		return h.finish(plan, req, result, false)
 	}
 
-	version := h.cache.Version()
 	// Check cache, then any entry that fetched a superset of the fields
 	if entry := h.cache.Get(cacheKey); entry != nil {
 		h.record(req, plan.Fetch, cmdKey, cacheKey, metrics.ResultHit, time.Since(start).Seconds()*1000)
@@ -238,8 +238,11 @@ func (h *Handler) handleExec(req *protocol.Request) *protocol.Response {
 		return h.finish(plan, req, result, true)
 	}
 
-	// Singleflight: coalesce concurrent requests for the same key
-	result, coalesced := h.doSingleflight(cacheKey, plan.Fetch, req)
+	// Singleflight: coalesce concurrent requests for the same key. The store
+	// fence uses the generation the fetch started at, so a caller joining a
+	// pre-invalidation fetch cannot store its stale result under its own
+	// newer generation.
+	result, version, coalesced := h.doSingleflight(cacheKey, plan.Fetch, req)
 	latency := time.Since(start).Seconds() * 1000
 
 	if coalesced {
@@ -429,15 +432,17 @@ func keyContext(ctx execctx.ExecContext, cl allowlist.Classification) execctx.Ex
 	return ctx
 }
 
-func (h *Handler) doSingleflight(key string, args []string, req *protocol.Request) (*executor.Result, bool) {
+func (h *Handler) doSingleflight(key string, args []string, req *protocol.Request) (*executor.Result, uint64, bool) {
 	h.mu.Lock()
 	if c, ok := h.inflight[key]; ok {
 		h.mu.Unlock()
 		c.wg.Wait()
-		return c.res, true // coalesced
+		// Coalesced onto a fetch that started at the recorded generation: the
+		// result carries that generation, not the joining call's.
+		return c.res, c.version, true
 	}
 
-	c := &call{}
+	c := &call{version: h.cache.Version()}
 	c.wg.Add(1)
 	h.inflight[key] = c
 	h.mu.Unlock()
@@ -449,7 +454,7 @@ func (h *Handler) doSingleflight(key string, args []string, req *protocol.Reques
 	delete(h.inflight, key)
 	h.mu.Unlock()
 
-	return c.res, false
+	return c.res, c.version, false
 }
 
 type cacheSnapshot struct {
