@@ -188,6 +188,7 @@ func (h *Handler) handleConditionalList(req *protocol.Request, s *resource.Shape
 			refreshed.ETag = old.ETag
 		}
 		if !h.cache.SetVersion(&refreshed, version) {
+			h.stats.Record(cmdKey, key, metrics.ResultMiss, time.Since(start).Seconds()*1000)
 			return &protocol.Response{Stderr: []byte("ghx: cached list invalidated during revalidation; retry explicitly\n"), ExitCode: 1}
 		}
 		status = metrics.ResultRevalidated
