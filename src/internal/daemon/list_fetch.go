@@ -178,6 +178,12 @@ func (h *Handler) handleConditionalList(req *protocol.Request, s *resource.Shape
 		if old == nil || old.ETag == "" {
 			return nil
 		}
+		// The fetch straddled an invalidation: the 304 body is the stale
+		// representation the mutation was meant to drop. Refuse it — the
+		// caller's normal path re-reads once, no implicit retry is made here.
+		if h.cache.Version() != version {
+			return nil
+		}
 		// A 304 refreshes the representation the cache already holds: no bytes
 		// change, no quota is spent, and the age restarts.
 		refreshed := *old
