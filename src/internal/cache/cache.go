@@ -214,6 +214,8 @@ func (c *Cache) Invalidate(matches func(*Entry) bool) int {
 func (c *Cache) InvalidateRepo(host, repo string) int {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	c.generation++
+	defer c.persistLocked()
 
 	var toRemove []*list.Element
 	for elem := c.order.Front(); elem != nil; elem = elem.Next() {
