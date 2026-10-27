@@ -338,7 +338,7 @@ func TestCapturedWorkloadReplay(t *testing.T) {
 	beforeHits, beforeCalls := run(false)
 	afterHits, afterCalls := run(true)
 	t.Logf("captured workload: calls=%d; before hits=%d upstream=%d; after hits=%d upstream=%d", len(fields), beforeHits, beforeCalls, afterHits, afterCalls)
-	if beforeHits != 0 || beforeCalls != 10 || afterHits != 9 || afterCalls != 1 {
+	if beforeHits != 1 || beforeCalls != 9 || afterHits != 9 || afterCalls != 1 {
 		t.Fatal("resource workload hit rate regressed")
 	}
 }

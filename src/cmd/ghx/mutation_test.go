@@ -182,9 +182,9 @@ func TestMainMutationUsesNativeStdinAndFlush(t *testing.T) {
 				select {
 				case req := <-requests:
 					if req.Type != protocol.TypeFlush || req.Resource != allowlist.ResourceUnknown ||
-						req.Dependency == nil || req.Dependency.Kind != "pr" || req.Dependency.ID != "1" ||
+						req.Dependency != nil ||
 						len(req.Args) != 0 || len(req.AuthEnv) != 0 {
-						t.Fatalf("mutation was sent through IPC: %+v", req)
+						t.Fatalf("expected a payload-free global flush, got: %+v", req)
 					}
 				case <-time.After(time.Second):
 					t.Fatal("missing post-mutation invalidation")

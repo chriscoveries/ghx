@@ -152,9 +152,9 @@ func TestHandler_CacheKeysIsolateAuthIdentity(t *testing.T) {
 	request := func(token, tokenHash string) *protocol.Response {
 		return h.Handle(&protocol.Request{
 			Type:    protocol.TypeExec,
-			Args:    []string{"api", "user", "--jq", ".login"},
+			Args:    []string{"pr", "view", "1"},
 			AuthEnv: authenv.Environment{"GH_TOKEN": token},
-			Context: execctx.ExecContext{RepoBound: true, Host: "github.com", TokenHash: tokenHash},
+			Context: execctx.ExecContext{RepoBound: true, Host: "github.com", Repo: "o/r", TokenHash: tokenHash},
 		})
 	}
 
@@ -224,6 +224,10 @@ func TestHandlerCacheByteBudget(t *testing.T) {
 			}
 			wantCalls, wantSize := 2, 0
 			wantUsage := cache.Usage{MaxBytes: 6, Rejected: 2}
+			if tt.exitCode != 0 {
+				// Failed results are not submitted to the cache byte budget.
+				wantUsage.Rejected = 0
+			}
 			if tt.retained {
 				wantCalls, wantSize = 1, 1
 				wantUsage.Bytes = int64(len(tt.stdout) + len(tt.stderr))
@@ -296,15 +300,15 @@ func TestHandler_SingleflightIsolatesAuthIdentity(t *testing.T) {
 	requests := []*protocol.Request{
 		{
 			Type:    protocol.TypeExec,
-			Args:    []string{"api", "user", "--jq", ".login"},
+			Args:    []string{"pr", "view", "1"},
 			AuthEnv: authenv.Environment{"GH_TOKEN": "account-one"},
-			Context: execctx.ExecContext{RepoBound: true, Host: "github.com", TokenHash: "hash-one"},
+			Context: execctx.ExecContext{RepoBound: true, Host: "github.com", Repo: "o/r", TokenHash: "hash-one"},
 		},
 		{
 			Type:    protocol.TypeExec,
-			Args:    []string{"api", "user", "--jq", ".login"},
+			Args:    []string{"pr", "view", "1"},
 			AuthEnv: authenv.Environment{"GH_TOKEN": "account-two"},
-			Context: execctx.ExecContext{RepoBound: true, Host: "github.com", TokenHash: "hash-two"},
+			Context: execctx.ExecContext{RepoBound: true, Host: "github.com", Repo: "o/r", TokenHash: "hash-two"},
 		},
 	}
 
@@ -585,7 +589,8 @@ func TestHandlerLifetimeTTLs(t *testing.T) {
 			h.execute = func(context.Context, string, []string, string, authenv.Environment) *executor.Result {
 				return &executor.Result{Stdout: []byte(tt.stdout), ExitCode: tt.exitCode}
 			}
-			h.Handle(&protocol.Request{Type: protocol.TypeExec, Args: tt.args, TTLOverride: tt.ttlFlag})
+			h.Handle(&protocol.Request{Type: protocol.TypeExec, Args: tt.args, TTLOverride: tt.ttlFlag,
+				Context: execctx.ExecContext{RepoBound: true, Host: "github.com", Repo: "o/r", TokenHash: "fixture-identity"}})
 			keys := h.cache.Keys()
 			if tt.exitCode != 0 {
 				if len(keys) != 0 {

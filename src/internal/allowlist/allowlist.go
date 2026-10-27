@@ -124,11 +124,13 @@ var mutatingActions = map[string]bool{
 	"sync":          true,
 }
 
-// mutationResourceOverrides route invalidation for mutations whose effect
-// lands in a different namespace than their subcommand.
+// mutationResourceOverrides identify special mutation actions and, where
+// necessary, route them to the resource their effect changes.
 var mutationResourceOverrides = map[string]ResourceType{
-	"workflow run": ResourceRun,
-	"label clone":  ResourceLabel,
+	"workflow run":     ResourceRun,
+	"label clone":      ResourceLabel,
+	"release upload":   ResourceRelease,
+	"project item-add": ResourceProject,
 }
 
 var subcommandResourceMap = map[string]ResourceType{
