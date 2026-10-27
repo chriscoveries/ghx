@@ -131,9 +131,31 @@ func (h *Handler) handleExec(req *protocol.Request) *protocol.Response {
 	// The client fingerprint identifies its default host credential. An
 	// explicit different host may use another credential, so do not share or
 	// populate cache entries when that effective identity is unbound.
-	defaultHost, _ := resource.Repository(req.Context.Host, req.Context.Repo)
+	defaultHost := req.Context.Host
+	if defaultHost == "" {
+		defaultHost = "github.com"
+	}
+	api := resource.ParseAPI(req.Args)
+	absoluteAPI := len(req.Args) > 0 && req.Args[0] == "api" && (strings.Contains(api.Endpoint, "://") || strings.HasPrefix(api.Endpoint, "//"))
+	literalAPI := len(req.Args) > 0 && req.Args[0] == "api" && api.Valid && !absoluteAPI && !strings.ContainsAny(api.Endpoint, "{}")
+	repoHost, _ := resource.Repository(req.Context.Host, req.Context.Repo)
+	ambiguousAPI := literalAPI && api.Host == "" && (!req.Context.RepoBound || !strings.EqualFold(repoHost, defaultHost))
+	if literalAPI && !req.Context.RepoBound {
+		// A literal API path cannot use the origin guess. Discard it before
+		// cache-key and invalidation metadata are derived.
+		copy := *req
+		copy.Context.Repo = ""
+		req = &copy
+	}
 	targetHost := resource.Identify(req.Context, req.Args).Host
-	if classification.Type == allowlist.Cacheable && !strings.EqualFold(targetHost, defaultHost) {
+	if literalAPI {
+		targetHost = defaultHost
+		if api.Host != "" {
+			targetHost = api.Host
+		}
+	}
+	unverifiedRepo := !req.Context.RepoBound && !literalAPI
+	if classification.Type == allowlist.Cacheable && (absoluteAPI || ambiguousAPI || unverifiedRepo || req.Context.TokenHash == "" || !strings.EqualFold(targetHost, defaultHost)) {
 		result := h.execGH(req.Args, req.WorkDir, req.AuthEnv)
 		h.record(req, nil, cmdKey, "", metrics.ResultPassthrough, time.Since(start).Seconds()*1000)
 		return &protocol.Response{Stdout: result.Stdout, Stderr: result.Stderr, ExitCode: result.ExitCode}
@@ -487,8 +509,8 @@ func (h *Handler) handleStats() *protocol.Response {
 
 func (h *Handler) handleFlush(req *protocol.Request) *protocol.Response {
 	var count int
-	if req.Dependency != nil {
-		count = h.invalidateDependency(*req.Dependency, req.CollectionsOnly)
+	if req.Dependency != nil || !req.Context.RepoBound {
+		count = h.cache.Flush()
 	} else if req.Resource == allowlist.ResourceUnknown {
 		count = h.cache.Flush()
 	} else {

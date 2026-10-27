@@ -241,7 +241,7 @@ ghx issue close 42
 ```
 First call:   ghx pr list ...   → 1.1s (cache miss, calls gh)
 Second call:  ghx pr list ...   → 0.1s (cache hit, instant)
-After 30s:    ghx pr list ...   → 1.0s (TTL expired, fresh call)
+After 5min:   ghx pr list ...   → 1.0s (default TTL expired, fresh call)
 ```
 
 ### How caching works
@@ -256,13 +256,16 @@ Each cached response is stored under a SHA-256 key computed from:
 - **Auth token hash** — SHA-256 fingerprint of your token (the token itself is never stored)
 - **Command arguments** — every argument and flag, except output filters (see below)
 
-Context the output cannot depend on is left out of the key, so `ghx run view 123`, `ghx pr view 42`, or `ghx api repos/o/r/pulls` run from different branches or checkouts share one entry. Commands that don't read the local repo at all (`search`, `gist`, `org list`, `repo list`, API paths without `{owner}`/`{repo}` placeholders) are shared across repositories.
+When a request is admitted to the cache, context the output cannot depend on is left out of its key. For example, literal API paths without `{owner}`/`{repo}` placeholders can share an entry across branches and checkouts.
+
+For repository-dependent reads, shared caching requires an explicit `GH_REPO`: a Git `origin` alone does not prove which remote native gh selected. Unbound reads, including requests from older clients without that binding, pass through. A missing token fingerprint also bypasses shared caching. Absolute API URLs pass through; a literal API path without repository placeholders needs either an explicitly matching `--hostname` or a bound repository on the credential's default host. These conservative rules can reduce cache hits. Each mutation flushes all cached scopes instead of guessing native gh's target; this can also reduce later hits.
 
 #### Output filters
 
 `--jq` and the order of `--json` fields don't change what gh fetches, so ghx caches the unfiltered response and applies the filter itself, using the same jq engine and output formatting as gh:
 
 ```bash
+export GH_REPO=brunoborges/ghx     # bind the repository for these examples
 ghx pr view 42 --json title,state,number   # fetch, cache
 ghx pr view 42 --json number,state,title   # hit (same fields, different order)
 ghx pr view 42 --json state --jq .state    # hit (subset of cached fields, filtered)
@@ -271,11 +274,11 @@ ghx api repos/o/r --jq .stargazers_count   # hit
 ghx pr view 42 --json url                  # miss (field not cached yet)
 ```
 
-If a filter fails, or the command exits non-zero, ghx runs the original command directly so you see gh's exact output. `--template`, `api --paginate`, `api --include`, and filters that read `env`/`$ENV` are cached by their exact arguments instead.
+Filter failures are returned to the caller. `--template`, `api --paginate`, `api --include`, and filters that read `env`/`$ENV` are cached by their exact arguments instead.
 
 #### Longer-lived data
 
-Some responses can't go stale, so they are kept longer than the regular TTL (unless a `--ttl` or `ttl_overrides` entry applies):
+Some responses can't go stale, so they are kept longer than the regular TTL (unless a per-call `--ttl` applies):
 
 - **Commit-addressed content** — `api repos/o/r/commits/<sha>`, `git/commits|trees|blobs/<sha>`: `up_immutable_ttl` (default 1h)
 - **Completed runs and jobs** — `run view <id>` and `api repos/o/r/actions/runs|jobs/<id>` once they report `"status":"completed"`: `settled_ttl` (default 10m)
@@ -298,12 +301,12 @@ This happens automatically — no configuration needed. The coalesced count is v
 ghx --no-cache pr list ...     # Fetch directly without changing the shared entry
 ghx --ttl 120 pr list ...      # Override TTL to 120 seconds
 GHX_NO_CACHE=1 ghx pr list ... # Same via env var
-GHX_TTL=60 ghx pr list ...     # Same via env var
+GHX_TTL=600 ghx pr list ...    # Default for a daemon started with this environment
 ```
 
 `--no-cache` bypasses shared cache lookup and storage for that call; it does not refresh an existing shared entry.
 
-Environment overrides work without a config file and take precedence over YAML values.
+The daemon reads environment overrides at startup; a running daemon keeps its current configuration. Configured default and per-command TTLs have a five-minute minimum. A positive per-call `--ttl` is a separate request override.
 
 ## Daemon Management
 
@@ -416,7 +419,7 @@ Only explicitly allowlisted read-only commands are cached:
 | `gh run watch/download` | ❌ (always passthrough) |
 | `gh auth/config/codespace/secret` | ❌ (always passthrough) |
 
-Mutations run in the invoking client, preserving stdin, stdout, stderr, and terminal prompts. After the command exits, ghx invalidates related cache entries, including when `--no-cache` is used or the command fails after a partial write. For example, `ghx pr merge 42` invalidates that PR, related issue/API entries and relevant collections; ambiguous writes invalidate more broadly. Mutations with `-R owner/repo` invalidate that repository rather than the current checkout. A mutation never starts a daemon solely to invalidate an empty cache. Older daemons safely flush the whole cache when receiving the scoped invalidation request.
+Mutations run in the invoking client, preserving stdin, stdout, stderr, and terminal prompts. After the command exits, ghx invalidates all in-memory cache entries, including when `--no-cache` is used or the command fails after a partial write. A mutation never starts a daemon solely to invalidate an empty cache. A configured persistent snapshot has a separate unresolved mutation/restart issue; keep `cache_file` unset.
 
 API requests are cached only when their effective method is GET. Fields imply POST unless the method is explicitly GET; GraphQL, input bodies, file-backed fields, and unknown options bypass caching. These requests are never coalesced. An invalidation failure prints a warning and preserves the mutation's exit code; the mutation is never retried.
 
@@ -431,7 +434,7 @@ additional_cacheable:
   - "gh secret list"
 ```
 
-Each entry should be the full command prefix (e.g., `"gh status"` for a single-word subcommand, or `"gh variable list"` for two-word). Custom commands are classified with `ResourceUnknown` — they participate in caching but won't be invalidated by mutation detection. To apply changes, restart the daemon: `ghxd --restart`.
+Each entry should be the full command prefix (e.g., `"gh status"` for a single-word subcommand, or `"gh variable list"` for two-word). Custom commands are classified with `ResourceUnknown`; a mutation's global flush invalidates them too. To apply changes, restart the daemon: `ghxd --restart`.
 
 ### TTL Override Keys
 
@@ -497,9 +500,9 @@ additional_cacheable:
   - "gh codespace list"
 
 ttl_overrides:
-  status: 120s
-  codespace_list: 60s
-  pr_list: 90s
+  status: 10m
+  codespace_list: 5m
+  pr_list: 5m
 ```
 
 ## Configuration
@@ -507,15 +510,15 @@ ttl_overrides:
 Configuration file: `~/.ghx/config.yaml`
 
 ```yaml
-# Default TTL for all cached commands (default: 30s)
-ttl: 30s
+# Default TTL for all cached commands (default and minimum: 5m)
+ttl: 5m
 
 # Per-command TTL overrides (see full key list below)
 ttl_overrides:
-  pr_list: 60s
-  pr_view: 30s
-  issue_list: 60s
-  run_list: 15s
+  pr_list: 5m
+  pr_view: 5m
+  issue_list: 5m
+  run_list: 5m
 
 # TTL for commit-SHA-addressed API content (default: 1h)
 up_immutable_ttl: 1h
@@ -590,7 +593,7 @@ separately by the entry limit, and executing commands still need working memory.
 - **Allowlist, not denylist** — only known-safe commands are cached
 - **Context-aware cache keys** — includes repo, branch, host, and auth token hash to prevent cross-context collisions
 - **Singleflight** — concurrent identical requests share a single `gh` execution
-- **Coarse invalidation** — mutations flush the entire resource namespace (all PR cache for that repo)
+- **Global invalidation** — mutations flush all in-memory cache entries
 - **Graceful fallback** — if daemon is down or fails, `ghx` runs `gh` directly
 - **Self-contained** — auto-downloads `gh` if not installed; no external dependencies beyond a network connection
 

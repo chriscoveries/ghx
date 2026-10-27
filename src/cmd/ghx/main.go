@@ -19,7 +19,6 @@ import (
 	execctx "github.com/brunoborges/ghx/src/internal/context"
 	"github.com/brunoborges/ghx/src/internal/ghcli"
 	"github.com/brunoborges/ghx/src/internal/protocol"
-	"github.com/brunoborges/ghx/src/internal/resource"
 )
 
 var version = "dev"
@@ -66,12 +65,9 @@ func main() {
 	// Mutations keep stdin in the invoking process but must still invalidate
 	// after a possibly partial write. Other stdin consumers remain direct.
 	if classification.Type == allowlist.Mutation {
-		ctx := execctx.Resolve(cfg.GHPath)
-		identity := resource.Identify(ctx, ghArgs)
 		cmd := exec.Command(cfg.GHPath, ghArgs...)
 		cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
-		req := &protocol.Request{Type: protocol.TypeFlush, Dependency: &identity,
-			CollectionsOnly: len(ghArgs) > 1 && ghArgs[1] == "create"}
+		req := &protocol.Request{Type: protocol.TypeFlush}
 		os.Exit(runMutation(cmd, req, client.New(cfg.SocketPath).Send))
 	}
 	if readsStdin(ghArgs, os.Stdin) {

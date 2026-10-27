@@ -121,7 +121,7 @@ func TestUnionNormalizedPostInvalidateStartsNewFlight(t *testing.T) {
 		}
 		return &executor.Result{Stdout: newBody}
 	}
-	req := &protocol.Request{Args: []string{"pr", "view", "21"}, Context: execctx.ExecContext{Host: "github.com", Repo: "brunoborges/ghx"}}
+	req := &protocol.Request{Args: []string{"pr", "view", "21"}, Context: execctx.ExecContext{RepoBound: true, Host: "github.com", Repo: "brunoborges/ghx", TokenHash: "fixture-identity"}}
 	key := execctx.CacheKey(req.Context, req.Args)
 	oldDone := make(chan struct{})
 	go func() {
@@ -181,7 +181,7 @@ func TestUnionCacheAdmissionPreservesForkExitRules(t *testing.T) {
 				calls.Add(1)
 				return &executor.Result{Stdout: body, ExitCode: tc.exitCode}
 			}
-			req := &protocol.Request{Args: tc.args, Context: execctx.ExecContext{Host: "github.com", Repo: "brunoborges/ghx"}}
+			req := &protocol.Request{Args: tc.args, Context: execctx.ExecContext{RepoBound: true, Host: "github.com", Repo: "brunoborges/ghx", TokenHash: "fixture-identity"}}
 			first, second := h.Handle(req), h.Handle(req)
 			if first.ExitCode != tc.exitCode || second.ExitCode != tc.exitCode || second.Cached != tc.shouldHold {
 				t.Fatalf("responses = %+v, %+v", first, second)
@@ -215,7 +215,7 @@ func TestUnionExplicitOtherHostBypassesSharedCache(t *testing.T) {
 				}
 				return &executor.Result{Stdout: after}
 			}
-			req := &protocol.Request{Args: args, Context: execctx.ExecContext{Host: "github.com", Repo: "brunoborges/ghx", TokenHash: "default-host-identity"}}
+			req := &protocol.Request{Args: args, Context: execctx.ExecContext{RepoBound: true, Host: "github.com", Repo: "brunoborges/ghx", TokenHash: "default-host-identity"}}
 			first, second := h.Handle(req), h.Handle(req)
 			if first.Cached || second.Cached || !bytes.Equal(first.Stdout, before) || !bytes.Equal(second.Stdout, after) || calls.Load() != 2 || h.cache.Size() != 0 {
 				t.Fatal("unbound target-host credential used the shared cache")
@@ -224,12 +224,137 @@ func TestUnionExplicitOtherHostBypassesSharedCache(t *testing.T) {
 	}
 }
 
+func TestUnionQualifiedContextRepoBypassesSharedCache(t *testing.T) {
+	// The target host is a routing control; the returned bodies are the
+	// separately retained public repository responses, not enterprise captures.
+	before, after := captured(t, "pr21"), captured(t, "pr22")
+	for _, tc := range []struct{ host, repo string }{
+		{"github.com", "enterprise.example/owner/repo"},
+		{"github.com", "https://enterprise.example/owner/repo"},
+		{"github.com", "unverified.invalid/unknown/unknown"},
+		{"enterprise.example", "github.com/chriscoveries/ghx"},
+	} {
+		t.Run(tc.host+"/"+tc.repo, func(t *testing.T) {
+			h := newTestHandler()
+			h.cfg.ResourceViews = true
+			var calls atomic.Int32
+			h.execute = func(context.Context, string, []string, string, authenv.Environment) *executor.Result {
+				if calls.Add(1) == 1 {
+					return &executor.Result{Stdout: before}
+				}
+				return &executor.Result{Stdout: after}
+			}
+			req := &protocol.Request{Args: []string{"pr", "view", "21", "--json", "number,title"}, Context: execctx.ExecContext{RepoBound: true, Host: tc.host, Repo: tc.repo, TokenHash: "default-host-identity"}}
+			first, second := h.Handle(req), h.Handle(req)
+			if first.Cached || second.Cached || !bytes.Equal(first.Stdout, before) || !bytes.Equal(second.Stdout, after) || calls.Load() != 2 || h.cache.Size() != 0 {
+				t.Fatal("qualified context repository used the default-host shared cache")
+			}
+		})
+	}
+}
+
+func TestUnionAbsoluteAPIEndpointBypassesSharedCache(t *testing.T) {
+	// The absolute endpoint is a parsing boundary control; no claim is made
+	// that the installed gh accepts it or that these bodies are from that host.
+	before, after := captured(t, "pr21"), captured(t, "pr22")
+	h := newTestHandler()
+	var calls atomic.Int32
+	h.execute = func(context.Context, string, []string, string, authenv.Environment) *executor.Result {
+		if calls.Add(1) == 1 {
+			return &executor.Result{Stdout: before}
+		}
+		return &executor.Result{Stdout: after}
+	}
+	req := &protocol.Request{Args: []string{"api", "https://enterprise.example/repos/owner/repo"}, Context: execctx.ExecContext{RepoBound: true, Host: "github.com", Repo: "brunoborges/ghx", TokenHash: "identity"}}
+	first, second := h.Handle(req), h.Handle(req)
+	if first.Cached || second.Cached || !bytes.Equal(first.Stdout, before) || !bytes.Equal(second.Stdout, after) || calls.Load() != 2 || h.cache.Size() != 0 {
+		t.Fatal("absolute API endpoint used the shared cache")
+	}
+}
+
+func TestUnionUnboundCredentialsAndAPIHostBypass(t *testing.T) {
+	before, after := captured(t, "pr21"), captured(t, "pr22")
+	for _, tc := range []struct {
+		name string
+		args []string
+		ctx  execctx.ExecContext
+	}{
+		{"missing credential fingerprint", []string{"pr", "view", "21"}, execctx.ExecContext{RepoBound: true, Host: "github.com", Repo: "brunoborges/ghx"}},
+		{"unbound API host", []string{"api", "repos/brunoborges/ghx"}, execctx.ExecContext{Host: "github.com", TokenHash: "identity"}},
+		{"different bound repo host", []string{"api", "repos/brunoborges/ghx"}, execctx.ExecContext{RepoBound: true, Host: "github.com", Repo: "enterprise.example/owner/repo", TokenHash: "identity"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newTestHandler()
+			var calls atomic.Int32
+			h.execute = func(context.Context, string, []string, string, authenv.Environment) *executor.Result {
+				if calls.Add(1) == 1 {
+					return &executor.Result{Stdout: before}
+				}
+				return &executor.Result{Stdout: after}
+			}
+			req := &protocol.Request{Args: tc.args, Context: tc.ctx}
+			first, second := h.Handle(req), h.Handle(req)
+			if first.Cached || second.Cached || !bytes.Equal(first.Stdout, before) || !bytes.Equal(second.Stdout, after) || calls.Load() != 2 || h.cache.Size() != 0 {
+				t.Fatal("ambiguous identity entered the shared cache")
+			}
+		})
+	}
+}
+
+func TestUnionImplicitRepoBypassesAndMutationFlushesAllHosts(t *testing.T) {
+	before, after := captured(t, "pr21"), captured(t, "pr22")
+	h := newTestHandler()
+	var calls atomic.Int32
+	h.execute = func(context.Context, string, []string, string, authenv.Environment) *executor.Result {
+		if calls.Add(1) == 1 {
+			return &executor.Result{Stdout: before}
+		}
+		return &executor.Result{Stdout: after}
+	}
+	// Repo is the origin guess; native gh can select a different remote.
+	ctx := execctx.ExecContext{Host: "github.com", Repo: "brunoborges/ghx", TokenHash: "identity"}
+	req := &protocol.Request{Args: []string{"pr", "view", "21"}, Context: ctx}
+	first, second := h.Handle(req), h.Handle(req)
+	if first.Cached || second.Cached || !bytes.Equal(first.Stdout, before) || !bytes.Equal(second.Stdout, after) || calls.Load() != 2 || h.cache.Size() != 0 {
+		t.Fatal("unbound implicit repository entered the shared cache")
+	}
+	for _, host := range []string{"github.com", "enterprise.example"} {
+		h.cache.Set(&cache.Entry{Key: host, Host: host, Stdout: before, CachedAt: time.Now(), TTL: 5 * time.Minute})
+	}
+	h.invalidateWrite(&protocol.Request{Args: []string{"pr", "close", "21"}, Context: ctx})
+	if h.cache.Size() != 0 {
+		t.Fatal("implicit mutation failed to invalidate another possible host")
+	}
+	for _, host := range []string{"github.com", "enterprise.example"} {
+		h.cache.Set(&cache.Entry{Key: host, Host: host, Stdout: before, CachedAt: time.Now(), TTL: 5 * time.Minute})
+	}
+	h.handleFlush(&protocol.Request{Type: protocol.TypeFlush, Resource: allowlist.ResourcePR, Context: ctx})
+	if h.cache.Size() != 0 {
+		t.Fatal("legacy unbound flush failed to invalidate another possible host")
+	}
+	for _, host := range []string{"github.com", "enterprise.example"} {
+		h.cache.Set(&cache.Entry{Key: host, Host: host, Stdout: before, CachedAt: time.Now(), TTL: 5 * time.Minute})
+	}
+	h.handleFlush(&protocol.Request{Type: protocol.TypeFlush, Dependency: &resource.Identity{Host: "github.com", Repo: "brunoborges/ghx", Kind: "pr"}, Context: ctx})
+	if h.cache.Size() != 0 {
+		t.Fatal("legacy unbound dependency failed to invalidate another possible host")
+	}
+	for _, host := range []string{"github.com", "enterprise.example"} {
+		h.cache.Set(&cache.Entry{Key: host, Host: host, Stdout: before, CachedAt: time.Now(), TTL: 5 * time.Minute})
+	}
+	ambiguous := execctx.ExecContext{RepoBound: true, Host: "github.com", Repo: "enterprise.example/owner/repo", TokenHash: "identity"}
+	h.invalidateWrite(&protocol.Request{Args: []string{"api", "repos/brunoborges/ghx", "-X", "PATCH"}, Context: ambiguous})
+	if h.cache.Size() != 0 {
+		t.Fatal("ambiguous API mutation failed to invalidate another possible host")
+	}
+}
+
 func TestUnionConditionalListInvalidationRefusesWithoutFallback(t *testing.T) {
 	h := newTestHandler()
 	h.cfg.ResourceViews = true
 	response304 := captured304(t)
 	req := &protocol.Request{Args: []string{"run", "list", "--json", "databaseId,status,conclusion", "-L", "1"},
-		Context: execctx.ExecContext{Host: "github.com", Repo: "chriscoveries/cifast", TokenHash: "identity"}}
+		Context: execctx.ExecContext{RepoBound: true, Host: "github.com", Repo: "chriscoveries/cifast", TokenHash: "identity"}}
 	s := resource.PrepareList(req.Context, req.Args)
 	if s == nil {
 		t.Fatal("retained list request has no resource shape")
@@ -262,7 +387,7 @@ func TestUnionConditionalGETInvalidationRefusesWithoutFallback(t *testing.T) {
 	h := newTestHandler()
 	body := captured(t, "repository")
 	response304 := captured304(t)
-	req := &protocol.Request{Args: []string{"api", "repos/brunoborges/ghx"}, Context: execctx.ExecContext{Host: "github.com", Repo: "brunoborges/ghx", TokenHash: "identity"}}
+	req := &protocol.Request{Args: []string{"api", "repos/brunoborges/ghx"}, Context: execctx.ExecContext{RepoBound: true, Host: "github.com", Repo: "brunoborges/ghx", TokenHash: "identity"}}
 	key := execctx.CacheKey(req.Context, req.Args)
 	h.cache.Set(&cache.Entry{Key: key, Stdout: body, ETag: recordedValidator, TTL: time.Second, CachedAt: time.Now().Add(-time.Minute)})
 	var calls atomic.Int32
@@ -288,7 +413,7 @@ func TestUnionConditionalListAcceptsObservedGh304Exit(t *testing.T) {
 	h.cfg.ResourceViews = true
 	response304 := captured304(t)
 	req := &protocol.Request{Args: []string{"run", "list", "--json", "databaseId,status,conclusion", "-L", "1"},
-		Context: execctx.ExecContext{Host: "github.com", Repo: "chriscoveries/cifast", TokenHash: "identity"}}
+		Context: execctx.ExecContext{RepoBound: true, Host: "github.com", Repo: "chriscoveries/cifast", TokenHash: "identity"}}
 	s := resource.PrepareList(req.Context, req.Args)
 	if s == nil {
 		t.Fatal("retained list request has no resource shape")

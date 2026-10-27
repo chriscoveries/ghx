@@ -11,7 +11,7 @@ The GitHub CLI (`gh`) has no client-side caching. When multiple AI agents (Copil
 - **`ghxd`** — a background daemon that executes `gh` commands, caches results, and serves cached responses
 - **`ghx`** — a thin CLI client that forwards commands to the daemon and returns results
 
-The system uses an **allowlist** of known-safe read-only commands, **request coalescing** to prevent duplicate in-flight calls, and a **configurable TTL** (default: 30s). Commands not on the allowlist are passed through directly to `gh` without caching.
+The system uses an **allowlist** of known-safe read-only commands, **request coalescing** to prevent duplicate in-flight calls, and a **configurable TTL** (default and configured minimum: 5m). A positive per-call `--ttl` is a separate request override. Commands not on the allowlist are passed through directly to `gh` without caching.
 
 ## Architecture
 
@@ -139,13 +139,7 @@ All three agents get the same response
 
 ### Cache Invalidation
 
-**Coarse-grained, namespace-based invalidation.** After any mutating command exits in the invoking client, a flush request invalidates all cached entries for the same `{host, repo, resource_type}` namespace.
-
-Resource types: `pr`, `issue`, `run`, `workflow`, `release`, `label`, `repo`, `api`.
-
-Example: After `gh pr merge #42`, all cached entries tagged `{github.com, owner/repo, pr}` are evicted, along with `{github.com, owner/repo, api}`. API writes evict every entry for the repo. Mutations target the repo named by `-R`/`--repo` or the API path when present.
-
-This is intentionally conservative — it may over-invalidate, but it will never serve stale data after mutations.
+After any mutating command exits in the invoking client, a flush request invalidates all in-memory cached entries. This conservative scope avoids guessing which host or repository native gh selected, at the cost of evicting unrelated entries. The optional persistent snapshot has a separate unresolved mutation/restart issue; keep `cache_file` unset.
 
 ### Cached Response Format
 
@@ -236,10 +230,7 @@ On SIGTERM/SIGINT: stop accepting new connections, wait for in-flight requests (
 
 ### In-Memory Cache
 
-Cache is in-memory only. Lost on daemon restart. This is acceptable because:
-- TTLs are short (30s default)
-- Daemon restarts are rare
-- Disk-based caching adds complexity without proportional benefit for this use case
+The cache is in memory by default. On Unix, an explicitly configured `cache_file` also enables a persisted snapshot; leave that option unset while its mutation/restart coherence is unresolved.
 
 ### LRU Eviction
 
@@ -307,15 +298,15 @@ Location: `~/.ghx/config.yaml` (Unix) or `%LOCALAPPDATA%\ghx\config.yaml` (Windo
 
 ```yaml
 # Default TTL for all cached commands
-ttl: 30s
+ttl: 5m
 
 # Per-command TTL overrides
 ttl_overrides:
-  pr_list: 60s
-  pr_view: 30s
-  issue_list: 60s
-  run_list: 15s
-  api_get: 30s
+  pr_list: 5m
+  pr_view: 5m
+  issue_list: 5m
+  run_list: 5m
+  api_get: 5m
 
 # Longer lifetimes for data that can't go stale
 up_immutable_ttl: 1h   # commit-SHA-addressed API content
@@ -429,9 +420,9 @@ Staleness checks only apply to the managed binary. If `gh` was found in PATH or 
 ## Error Handling
 
 - **Daemon unavailable**: Auto-start the daemon, then retry. If auto-start itself fails (e.g., socket conflict, permissions), fall back to executing `gh` directly (never block the user)
-- **`gh` execution error**: Cache the error response too (exit code, stderr) for the TTL duration to avoid hammering a failing endpoint
+- **`gh` execution error**: Do not cache failed results, except the existing pending `pr checks` exit status 8.
 - **Socket timeout**: 5-second timeout on client→daemon communication; fall back to direct `gh` on timeout
-- **Cache corruption**: In-memory only, so restart the daemon to clear
+- **Cache corruption**: Restart clears the default in-memory cache. A configured persistent snapshot requires separate custody and recovery.
 
 ## Project Structure
 
@@ -512,9 +503,9 @@ ghx/
 - `ghx` client and `ghxd` daemon
 - IPC via Unix domain sockets (macOS/Linux) and named pipes (Windows)
 - Allowlisted command caching with context-aware keys
-- Configurable TTL (default 30s)
+- Configurable TTL (default and configured minimum 5m)
 - Singleflight request coalescing (inline in handler)
-- Coarse-grained invalidation after mutations
+- Global in-memory invalidation after mutations
 - Auto-start daemon, fallback to direct `gh` on failure
 - `ghx xcache stats` for CLI metrics
 - `ghx xdaemon start/stop/status`

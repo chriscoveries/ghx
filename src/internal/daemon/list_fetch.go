@@ -146,10 +146,9 @@ func (h *Handler) handleConditionalList(req *protocol.Request, s *resource.Shape
 	start := time.Now()
 	key := execctx.CacheKey(s.Context, s.Args)
 	if entry := h.cache.Peek(key); entry != nil && !entry.IsExpired() {
-		projected, err := s.Project(entry.Stdout)
-		if err == nil {
+		if _, err := s.Project(entry.Stdout); err == nil {
 			h.stats.Record(cmdKey, key, metrics.ResultHit, time.Since(start).Seconds()*1000)
-			return &protocol.Response{Stdout: projected, Stderr: entry.Stderr, ExitCode: entry.ExitCode, Cached: true}
+			return h.renderResource(req, s, entry.Stdout, entry.Stderr, true)
 		}
 	}
 	version := h.cache.Version()
@@ -159,6 +158,11 @@ func (h *Handler) handleConditionalList(req *protocol.Request, s *resource.Shape
 		args = append(args, "--header", "If-None-Match: "+old.ETag)
 	}
 	r := h.execGH(args, req.WorkDir, req.AuthEnv)
+	// A known upstream outage or rate limit is already a terminal observation.
+	// Do not turn it into an additional superset and native request.
+	if r.ExitCode != 0 && upstreamUnavailable(r.Stderr) {
+		return &protocol.Response{Stderr: r.Stderr, ExitCode: r.ExitCode}
+	}
 	response, err := http.ReadResponse(bufio.NewReader(bytes.NewReader(r.Stdout)), nil)
 	if err != nil {
 		return nil
@@ -208,10 +212,9 @@ func (h *Handler) handleConditionalList(req *protocol.Request, s *resource.Shape
 	} else {
 		return nil
 	}
-	projected, err := s.Project(body)
-	if err != nil {
+	if _, err := s.Project(body); err != nil {
 		return nil
 	}
 	h.stats.Record(cmdKey, key, status, time.Since(start).Seconds()*1000)
-	return &protocol.Response{Stdout: projected, Cached: status != metrics.ResultMiss}
+	return h.renderResource(req, s, body, nil, status != metrics.ResultMiss)
 }

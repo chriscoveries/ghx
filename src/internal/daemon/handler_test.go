@@ -154,7 +154,7 @@ func TestHandler_CacheKeysIsolateAuthIdentity(t *testing.T) {
 			Type:    protocol.TypeExec,
 			Args:    []string{"api", "user", "--jq", ".login"},
 			AuthEnv: authenv.Environment{"GH_TOKEN": token},
-			Context: execctx.ExecContext{Host: "github.com", TokenHash: tokenHash},
+			Context: execctx.ExecContext{RepoBound: true, Host: "github.com", TokenHash: tokenHash},
 		})
 	}
 
@@ -209,7 +209,7 @@ func TestHandlerCacheByteBudget(t *testing.T) {
 			req := &protocol.Request{
 				Type:    protocol.TypeExec,
 				Args:    []string{"pr", "list"},
-				Context: execctx.ExecContext{Host: "github.com", Repo: "o/r"},
+				Context: execctx.ExecContext{RepoBound: true, Host: "github.com", Repo: "o/r", TokenHash: "fixture-identity"},
 			}
 			for i := range 2 {
 				resp := s.handler.Handle(req)
@@ -261,7 +261,7 @@ func TestHandlerProtocolOversizedResponsePreservesCache(t *testing.T) {
 	req := &protocol.Request{
 		Type:    protocol.TypeExec,
 		Args:    []string{"pr", "list"},
-		Context: execctx.ExecContext{Host: "github.com", Repo: "o/r"},
+		Context: execctx.ExecContext{RepoBound: true, Host: "github.com", Repo: "o/r", TokenHash: "fixture-identity"},
 	}
 	for range 2 {
 		resp := s.handler.Handle(req)
@@ -298,13 +298,13 @@ func TestHandler_SingleflightIsolatesAuthIdentity(t *testing.T) {
 			Type:    protocol.TypeExec,
 			Args:    []string{"api", "user", "--jq", ".login"},
 			AuthEnv: authenv.Environment{"GH_TOKEN": "account-one"},
-			Context: execctx.ExecContext{Host: "github.com", TokenHash: "hash-one"},
+			Context: execctx.ExecContext{RepoBound: true, Host: "github.com", TokenHash: "hash-one"},
 		},
 		{
 			Type:    protocol.TypeExec,
 			Args:    []string{"api", "user", "--jq", ".login"},
 			AuthEnv: authenv.Environment{"GH_TOKEN": "account-two"},
-			Context: execctx.ExecContext{Host: "github.com", TokenHash: "hash-two"},
+			Context: execctx.ExecContext{RepoBound: true, Host: "github.com", TokenHash: "hash-two"},
 		},
 	}
 
@@ -361,7 +361,7 @@ func TestHandlerNoCacheMutationInvalidates(t *testing.T) {
 				}
 				return &executor.Result{Stdout: []byte(value)}
 			}
-			ctx := execctx.ExecContext{Host: "github.com", Repo: "owner/repo"}
+			ctx := execctx.ExecContext{RepoBound: true, Host: "github.com", Repo: "owner/repo", TokenHash: "fixture-identity"}
 			read := &protocol.Request{Type: protocol.TypeExec, Args: []string{"pr", "view", "1"}, Context: ctx}
 			h.Handle(read)
 			if !h.Handle(read).Cached {
@@ -402,7 +402,7 @@ func TestHandlerScopedFlush(t *testing.T) {
 		h.cache.Set(&entry)
 	}
 	h.Handle(&protocol.Request{Type: protocol.TypeFlush, Resource: allowlist.ResourcePR,
-		Context: execctx.ExecContext{Host: "github.com", Repo: "owner/repo"}})
+		Context: execctx.ExecContext{RepoBound: true, Host: "github.com", Repo: "owner/repo", TokenHash: "fixture-identity"}})
 	if h.cache.Get("target") != nil || h.cache.Size() != 2 {
 		t.Fatalf("scoped flush left keys %v", h.cache.Keys())
 	}
@@ -413,7 +413,7 @@ func TestHandlerScopedFlush(t *testing.T) {
 }
 
 func TestHandlerInvalidationCrossesAPINamespace(t *testing.T) {
-	ctx := execctx.ExecContext{Host: "github.com", Repo: "owner/repo"}
+	ctx := execctx.ExecContext{RepoBound: true, Host: "github.com", Repo: "owner/repo", TokenHash: "fixture-identity"}
 	seed := func(h *Handler) {
 		for _, entry := range []cache.Entry{
 			{Key: "run", Host: ctx.Host, Repo: ctx.Repo, Resource: allowlist.ResourceRun},
@@ -459,7 +459,7 @@ func TestHandlerNoCacheBypassesWithoutReplacingSharedEntry(t *testing.T) {
 		calls++
 		return &executor.Result{Stdout: value}
 	}
-	ctx := execctx.ExecContext{Host: "github.com", Repo: "owner/repo"}
+	ctx := execctx.ExecContext{RepoBound: true, Host: "github.com", Repo: "owner/repo", TokenHash: "fixture-identity"}
 	read := func(noCache bool) *protocol.Response {
 		return h.Handle(&protocol.Request{Type: protocol.TypeExec, Args: []string{"pr", "view", "21"}, Context: ctx, NoCache: noCache})
 	}
@@ -502,23 +502,23 @@ func TestHandlerKeyScopeSharesAcrossCheckouts(t *testing.T) {
 		shared bool
 	}{
 		{"run view remains branch scoped", []string{"run", "view", "7"},
-			execctx.ExecContext{Host: "github.com", Repo: "o/r", Branch: "main"},
-			execctx.ExecContext{Host: "github.com", Repo: "o/r", Branch: "feature"}, false},
+			execctx.ExecContext{RepoBound: true, Host: "github.com", Repo: "o/r", Branch: "main", TokenHash: "fixture-identity"},
+			execctx.ExecContext{RepoBound: true, Host: "github.com", Repo: "o/r", Branch: "feature", TokenHash: "fixture-identity"}, false},
 		{"pr view without selector stays per branch", []string{"pr", "view"},
-			execctx.ExecContext{Host: "github.com", Repo: "o/r", Branch: "main"},
-			execctx.ExecContext{Host: "github.com", Repo: "o/r", Branch: "feature"}, false},
+			execctx.ExecContext{RepoBound: true, Host: "github.com", Repo: "o/r", Branch: "main", TokenHash: "fixture-identity"},
+			execctx.ExecContext{RepoBound: true, Host: "github.com", Repo: "o/r", Branch: "feature", TokenHash: "fixture-identity"}, false},
 		{"conditional api retains checkout scope", []string{"api", "repos/o/r/actions/runs"},
-			execctx.ExecContext{Host: "github.com", Repo: "a/a", Branch: "x"},
-			execctx.ExecContext{Host: "github.com", Repo: "b/b", Branch: "y"}, false},
+			execctx.ExecContext{RepoBound: true, Host: "github.com", Repo: "a/a", Branch: "x", TokenHash: "fixture-identity"},
+			execctx.ExecContext{RepoBound: true, Host: "github.com", Repo: "b/b", Branch: "y", TokenHash: "fixture-identity"}, false},
 		{"api placeholder stays per repo", []string{"api", "repos/{owner}/{repo}"},
-			execctx.ExecContext{Host: "github.com", Repo: "a/a"},
-			execctx.ExecContext{Host: "github.com", Repo: "b/b"}, false},
+			execctx.ExecContext{RepoBound: true, Host: "github.com", Repo: "a/a", TokenHash: "fixture-identity"},
+			execctx.ExecContext{RepoBound: true, Host: "github.com", Repo: "b/b", TokenHash: "fixture-identity"}, false},
 		{"issue view stays per repo", []string{"issue", "view", "1"},
-			execctx.ExecContext{Host: "github.com", Repo: "a/a"},
-			execctx.ExecContext{Host: "github.com", Repo: "b/b"}, false},
+			execctx.ExecContext{RepoBound: true, Host: "github.com", Repo: "a/a", TokenHash: "fixture-identity"},
+			execctx.ExecContext{RepoBound: true, Host: "github.com", Repo: "b/b", TokenHash: "fixture-identity"}, false},
 		{"token still isolates", []string{"api", "user"},
-			execctx.ExecContext{Host: "github.com", TokenHash: "one"},
-			execctx.ExecContext{Host: "github.com", TokenHash: "two"}, false},
+			execctx.ExecContext{RepoBound: true, Host: "github.com", TokenHash: "one"},
+			execctx.ExecContext{RepoBound: true, Host: "github.com", TokenHash: "two"}, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -546,7 +546,7 @@ func TestHandlerExplicitRepoMutationInvalidatesTarget(t *testing.T) {
 	h.execute = func(context.Context, string, []string, string, authenv.Environment) *executor.Result {
 		return &executor.Result{Stdout: []byte("ok")}
 	}
-	cwd := execctx.ExecContext{Host: "github.com", Repo: "cwd/repo"}
+	cwd := execctx.ExecContext{RepoBound: true, Host: "github.com", Repo: "cwd/repo", TokenHash: "fixture-identity"}
 	read := &protocol.Request{Type: protocol.TypeExec, Args: []string{"api", "repos/o/r/pulls/1"}, Context: cwd}
 	h.Handle(read)
 	h.Handle(&protocol.Request{Type: protocol.TypeExec, Args: []string{"pr", "merge", "1", "-R", "o/r"}, Context: cwd})
@@ -630,7 +630,7 @@ func TestHandlerOutputShaping(t *testing.T) {
 	h := newTestHandler()
 	var calls [][]string
 	h.execute = fakeJSONGH(&calls)
-	ctx := execctx.ExecContext{Host: "github.com", Repo: "o/r"}
+	ctx := execctx.ExecContext{RepoBound: true, Host: "github.com", Repo: "o/r", TokenHash: "fixture-identity"}
 	run := func(args ...string) *protocol.Response {
 		return h.Handle(&protocol.Request{Type: protocol.TypeExec, Args: args, Context: ctx})
 	}
@@ -666,7 +666,7 @@ func TestHandlerJQFallsBackToGH(t *testing.T) {
 	h := newTestHandler()
 	var calls [][]string
 	h.execute = fakeJSONGH(&calls)
-	ctx := execctx.ExecContext{Host: "github.com", Repo: "o/r"}
+	ctx := execctx.ExecContext{RepoBound: true, Host: "github.com", Repo: "o/r", TokenHash: "fixture-identity"}
 	req := &protocol.Request{Type: protocol.TypeExec, Args: []string{"pr", "view", "7", "--json", "state", "--jq", ".state | keys"}, Context: ctx}
 	got := h.Handle(req)
 	if string(got.Stdout) != "raw-gh\n" {
@@ -696,7 +696,7 @@ func TestHandlerAPIJQSharesResponse(t *testing.T) {
 		calls++
 		return &executor.Result{Stdout: body}
 	}
-	ctx := execctx.ExecContext{Host: "github.com", Repo: "o/r"}
+	ctx := execctx.ExecContext{RepoBound: true, Host: "github.com", Repo: "o/r", TokenHash: "fixture-identity"}
 	for _, tc := range []struct{ jq, want string }{{".id", "1211583246\n"}, {".name", "ghx\n"}, {".private", "false\n"}} {
 		got := h.Handle(&protocol.Request{Type: protocol.TypeExec, Args: []string{"api", "repos/o/r", "--jq", tc.jq}, Context: ctx})
 		if string(got.Stdout) != tc.want {
@@ -714,7 +714,7 @@ func TestHandlerLogsRedactedArgsWhenEnabled(t *testing.T) {
 	h.execute = func(context.Context, string, []string, string, authenv.Environment) *executor.Result {
 		return &executor.Result{Stdout: []byte(`{"a":1}`)}
 	}
-	ctx := execctx.ExecContext{Host: "github.com", Repo: "o/r"}
+	ctx := execctx.ExecContext{RepoBound: true, Host: "github.com", Repo: "o/r", TokenHash: "fixture-identity"}
 	h.Handle(&protocol.Request{Type: protocol.TypeExec, Args: []string{"api", "repos/o/r", "-H", "Authorization: token x", "--jq", ".a"}, Context: ctx, NoCache: true})
 	h.Handle(&protocol.Request{Type: protocol.TypeExec, Args: []string{"run", "view", "7"}, Context: ctx})
 

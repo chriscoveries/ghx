@@ -47,7 +47,7 @@ func resourceHandler(t *testing.T) (*Handler, []byte, *atomic.Int32) {
 	return h, body, calls
 }
 func view(fields string) *protocol.Request {
-	return &protocol.Request{Args: []string{"pr", "view", "21", "--json", fields}, Context: execctx.ExecContext{Host: "github.com", Repo: "brunoborges/ghx", Branch: "one", TokenHash: "identity"}}
+	return &protocol.Request{Args: []string{"pr", "view", "21", "--json", fields}, Context: execctx.ExecContext{RepoBound: true, Host: "github.com", Repo: "brunoborges/ghx", Branch: "one", TokenHash: "identity"}}
 }
 func expire(t *testing.T, h *Handler, key string, age time.Duration) {
 	t.Helper()
@@ -136,7 +136,7 @@ func TestResourceSingleflightProjectsEachWaiter(t *testing.T) {
 		}
 	}
 }
-func TestPreciseWriteInvalidation(t *testing.T) {
+func TestWriteInvalidationClearsAllScopes(t *testing.T) {
 	for _, args := range [][]string{
 		{"pr", "edit", "21", "--repo", "brunoborges/ghx"},
 		{"pr", "comment", "https://github.com/brunoborges/ghx/pull/21"},
@@ -157,21 +157,16 @@ func TestPreciseWriteInvalidation(t *testing.T) {
 			req.Context.Repo = "default/repo"
 			req.NoCache = true
 			h.Handle(req)
-			for _, key := range []string{"target", "list", "issue-comments"} {
+			for _, key := range []string{"target", "list", "issue-comments", "other-object", "other-repo"} {
 				if h.cache.Peek(key) != nil {
 					t.Errorf("write retained %s", key)
-				}
-			}
-			for _, key := range []string{"other-object", "other-repo"} {
-				if h.cache.Peek(key) == nil {
-					t.Errorf("write evicted %s", key)
 				}
 			}
 		})
 	}
 }
 
-func TestStructuredMutationFlushKeepsDependencySemantics(t *testing.T) {
+func TestStructuredMutationFlushClearsAllScopes(t *testing.T) {
 	h, body, _ := resourceHandler(t)
 	request := view("number")
 	h.Handle(request)
@@ -188,18 +183,15 @@ func TestStructuredMutationFlushKeepsDependencySemantics(t *testing.T) {
 		h.cache.Set(&entry)
 	}
 	identity := resource.Identify(request.Context, []string{"pr", "edit", "21"})
-	h.Handle(&protocol.Request{Type: protocol.TypeFlush, Dependency: &identity})
-	for _, removed := range []string{key, "related-issue", "search"} {
+	h.Handle(&protocol.Request{Type: protocol.TypeFlush, Dependency: &identity, Context: execctx.ExecContext{RepoBound: true}})
+	for _, removed := range []string{key, "related-issue", "search", "other-object"} {
 		if h.cache.Peek(removed) != nil {
 			t.Errorf("mutation flush retained dependent entry %s", removed)
 		}
 	}
-	if h.cache.Peek("other-object") == nil {
-		t.Fatal("precise mutation flush removed unrelated object")
-	}
 }
 
-func TestFailedWriteInvalidatesAndCreateOnlyEvictsCollections(t *testing.T) {
+func TestFailedWriteAndCreateInvalidateAllScopes(t *testing.T) {
 	h, body, _ := resourceHandler(t)
 	h.Handle(view("number"))
 	req := view("number")
@@ -221,8 +213,8 @@ func TestFailedWriteInvalidatesAndCreateOnlyEvictsCollections(t *testing.T) {
 	h.cache.Set(&cache.Entry{Key: "list", Host: req.Context.Host, Repo: req.Context.Repo, Resource: allowlist.ResourcePR, TTL: time.Hour, CachedAt: time.Now()})
 	req.Args = []string{"pr", "create"}
 	h.Handle(req)
-	if h.cache.Peek("list") != nil || !h.Handle(view("number")).Cached {
-		t.Fatal("create did not preserve existing objects while evicting collections")
+	if h.cache.Peek("list") != nil || h.Handle(view("number")).Cached {
+		t.Fatal("create left cached entries after its global invalidation")
 	}
 }
 func TestReadBeforeWriteCannotRefillOrBeJoinedAfterWrite(t *testing.T) {
@@ -275,7 +267,7 @@ func httpOutput(body []byte, status int, etag string) []byte {
 func TestConditionalGETReuses304AndReplacesChangedBodies(t *testing.T) {
 	h := newTestHandler()
 	body := captured(t, "repository")
-	req := &protocol.Request{Args: []string{"api", "repos/brunoborges/ghx"}, Context: execctx.ExecContext{Host: "github.com", Repo: "brunoborges/ghx", TokenHash: "identity"}}
+	req := &protocol.Request{Args: []string{"api", "repos/brunoborges/ghx"}, Context: execctx.ExecContext{RepoBound: true, Host: "github.com", Repo: "brunoborges/ghx", TokenHash: "identity"}}
 	key := execctx.CacheKey(req.Context, req.Args)
 	calls := 0
 	h.execute = func(_ context.Context, _ string, args []string, _ string, _ authenv.Environment) *executor.Result {
@@ -315,7 +307,7 @@ func TestConditionalGETReuses304AndReplacesChangedBodies(t *testing.T) {
 }
 func TestConditionalFailureDoesNotCacheOrReplaceValidator(t *testing.T) {
 	h := newTestHandler()
-	req := &protocol.Request{Args: []string{"api", "repos/brunoborges/ghx"}, Context: execctx.ExecContext{Host: "github.com"}}
+	req := &protocol.Request{Args: []string{"api", "repos/brunoborges/ghx"}, Context: execctx.ExecContext{RepoBound: true, Host: "github.com", TokenHash: "fixture-identity"}}
 	body := captured(t, "repository")
 	key := execctx.CacheKey(req.Context, req.Args)
 	h.cache.Set(&cache.Entry{Key: key, Stdout: body, ETag: `"old"`, TTL: time.Second, CachedAt: time.Now().Add(-time.Minute)})

@@ -19,6 +19,8 @@ concurrency:
 
 jobs:
   deploy:
+    # Fork synchronization does not authorize a site publication.
+    if: github.repository == 'brunoborges/ghx'
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
