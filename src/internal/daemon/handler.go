@@ -222,11 +222,12 @@ func (h *Handler) handleExec(req *protocol.Request) *protocol.Response {
 	if req.NoCache {
 		result := h.execGH(plan.Fetch, req.WorkDir, req.AuthEnv)
 		h.record(req, plan.Fetch, cmdKey, cacheKey, metrics.ResultMiss, time.Since(start).Seconds()*1000)
-		h.store(cacheKey, cmdKey, classification, req, result)
+		h.store(cacheKey, cmdKey, classification, req, result, h.cache.Version())
 		h.indexFields(baseKey, cacheKey, plan.Fields)
 		return h.finish(plan, req, result, false)
 	}
 
+	version := h.cache.Version()
 	// Check cache, then any entry that fetched a superset of the fields
 	if entry := h.cache.Get(cacheKey); entry != nil {
 		h.record(req, plan.Fetch, cmdKey, cacheKey, metrics.ResultHit, time.Since(start).Seconds()*1000)
@@ -247,7 +248,7 @@ func (h *Handler) handleExec(req *protocol.Request) *protocol.Response {
 		h.record(req, plan.Fetch, cmdKey, cacheKey, metrics.ResultMiss, latency)
 	}
 
-	h.store(cacheKey, cmdKey, classification, req, result)
+	h.store(cacheKey, cmdKey, classification, req, result, version)
 	h.indexFields(baseKey, cacheKey, plan.Fields)
 
 	return h.finish(plan, req, result, false)
@@ -368,7 +369,7 @@ func (h *Handler) lookupSuperset(baseKey string, fields []string) *executor.Resu
 	return nil
 }
 
-func (h *Handler) store(cacheKey, cmdKey string, classification allowlist.Classification, req *protocol.Request, result *executor.Result) {
+func (h *Handler) store(cacheKey, cmdKey string, classification allowlist.Classification, req *protocol.Request, result *executor.Result, version uint64) {
 	ttl := h.cfg.CommandTTL(cmdKey)
 	if req.TTLOverride > 0 {
 		ttl = time.Duration(req.TTLOverride) * time.Second
@@ -381,7 +382,7 @@ func (h *Handler) store(cacheKey, cmdKey string, classification allowlist.Classi
 	}
 
 	host, repo := classification.Target(req.Context.Host, req.Context.Repo)
-	h.cache.Set(&cache.Entry{
+	h.cache.SetVersion(&cache.Entry{
 		Key:      cacheKey,
 		Stdout:   result.Stdout,
 		Stderr:   result.Stderr,
@@ -391,7 +392,7 @@ func (h *Handler) store(cacheKey, cmdKey string, classification allowlist.Classi
 		Resource: classification.Resource,
 		Host:     host,
 		Repo:     repo,
-	})
+	}, version)
 }
 
 // reportsCompleted reports whether stdout is a JSON object whose top-level
