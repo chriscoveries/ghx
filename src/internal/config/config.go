@@ -10,25 +10,25 @@ import (
 )
 
 type Config struct {
-	CacheFile       string                   `yaml:"cache_file"`
-	ResourceViews   bool                     `yaml:"resource_views"`
-	ImmutableTTL    time.Duration            `yaml:"immutable_ttl"`
-	TTL             time.Duration            `yaml:"ttl"`
-	TTLOverrides    map[string]time.Duration `yaml:"ttl_overrides"`
+	CacheFile     string                   `yaml:"cache_file"`
+	ResourceViews bool                     `yaml:"resource_views"`
+	ImmutableTTL  time.Duration            `yaml:"immutable_ttl"`
+	TTL           time.Duration            `yaml:"ttl"`
+	TTLOverrides  map[string]time.Duration `yaml:"ttl_overrides"`
 	// upstream's immutable_ttl/settled_ttl fields are a distinct, newer
 	// naming; both sides' yaml keys coexist (different key names)
-	UpImmutableTTL  time.Duration            `yaml:"up_immutable_ttl"`
-	SettledTTL      time.Duration            `yaml:"settled_ttl"`   // specific runs/jobs reporting status "completed"
-	MaxCacheBytes   int64                    `yaml:"max_cache_bytes"`
-	MaxCacheEntries int                      `yaml:"max_cache_entries"`
-	SocketPath      string                   `yaml:"socket_path"`
-	PIDFile         string                   `yaml:"pid_file"`
-	AutoStart       bool                     `yaml:"auto_start"`
-	AdditionalCache []string                 `yaml:"additional_cacheable"`
-	DashboardPort   int                      `yaml:"dashboard_port"`
-	GHPath          string                   `yaml:"gh_path"`
-	LogFile         string                   `yaml:"log_file"`
-	LogArgs         bool                     `yaml:"log_args"` // keep redacted command arguments in the in-memory request log
+	UpImmutableTTL  time.Duration `yaml:"up_immutable_ttl"`
+	SettledTTL      time.Duration `yaml:"settled_ttl"` // specific runs/jobs reporting status "completed"
+	MaxCacheBytes   int64         `yaml:"max_cache_bytes"`
+	MaxCacheEntries int           `yaml:"max_cache_entries"`
+	SocketPath      string        `yaml:"socket_path"`
+	PIDFile         string        `yaml:"pid_file"`
+	AutoStart       bool          `yaml:"auto_start"`
+	AdditionalCache []string      `yaml:"additional_cacheable"`
+	DashboardPort   int           `yaml:"dashboard_port"`
+	GHPath          string        `yaml:"gh_path"`
+	LogFile         string        `yaml:"log_file"`
+	LogArgs         bool          `yaml:"log_args"` // keep redacted command arguments in the in-memory request log
 }
 
 func DefaultConfig() *Config {

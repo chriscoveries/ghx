@@ -242,7 +242,6 @@ func TestProtocolOversizedResponsesPreserveCache(t *testing.T) {
 	}
 }
 
-
 func TestByteBudgetCountsStderrAndReleases(t *testing.T) {
 	c := NewWithByteLimit(2, 6)
 	a := budgetEntry(t, "a", 3)
@@ -388,4 +387,3 @@ func TestInvalidateRepo(t *testing.T) {
 		t.Fatalf("InvalidateRepo removed %d, keys=%v", n, c.Keys())
 	}
 }
-

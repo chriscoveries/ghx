@@ -154,6 +154,10 @@ func TestAPIWritesAndRunMutationsCannotBeCached(t *testing.T) {
 	} {
 		if got := c.Classify(args); got.Type != Mutation {
 			t.Errorf("%v: type=%v", args, got.Type)
+		}
+	}
+}
+
 func TestAPIEffectiveMethod(t *testing.T) {
 	c := NewClassifier(nil)
 	tests := []struct {
