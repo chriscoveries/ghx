@@ -66,10 +66,17 @@ func TestRepoInvalidationFencesEmptyAndPersistsDeletion(t *testing.T) {
 	}
 	key := "0123456789012345678901234567890123456789012345678901234567890123"
 	entry := &Entry{Key: key, Stdout: body, Host: "github.com", Repo: "brunoborges/ghx", CachedAt: time.Now(), TTL: time.Hour}
+	otherKey := "1123456789012345678901234567890123456789012345678901234567890123"
+	otherBody, err := os.ReadFile("../../../testdata/api-throttle/issue140.http")
+	if err != nil {
+		t.Fatal(err)
+	}
+	other := &Entry{Key: otherKey, Stdout: otherBody, Host: "github.com", Repo: "chriscoveries/cifast", CachedAt: time.Now(), TTL: time.Hour}
 	if c.SetVersion(entry, version) || c.Get(key) != nil {
 		t.Fatal("empty invalidation accepted a stale fill")
 	}
 	c.Set(entry)
+	c.Set(other)
 	if c.Get(key) == nil {
 		t.Fatal("fixture was not retained before invalidation")
 	}
@@ -81,7 +88,7 @@ func TestRepoInvalidationFencesEmptyAndPersistsDeletion(t *testing.T) {
 	if err := reloaded.EnableDisk(path); err != nil {
 		t.Fatal(err)
 	}
-	if reloaded.Peek(key) != nil {
-		t.Fatal("disk reload resurrected the invalidated entry")
+	if reloaded.Peek(key) != nil || reloaded.Get(otherKey) == nil {
+		t.Fatal("disk reload resurrected invalidated bytes or lost the unrelated entry")
 	}
 }

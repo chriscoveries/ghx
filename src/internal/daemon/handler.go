@@ -408,9 +408,18 @@ func reportsCompleted(stdout []byte) bool {
 }
 
 func (h *Handler) doSingleflightExec(key string, execute func() *executor.Result) (*executor.Result, bool) {
+	return h.doSingleflightExecWithJoin(key, execute, nil)
+}
+
+// The optional join callback lets the concurrency control observe the exact
+// handoff before the follower waits; production calls do not install one.
+func (h *Handler) doSingleflightExecWithJoin(key string, execute func() *executor.Result, joined func()) (*executor.Result, bool) {
 	h.mu.Lock()
 	if c, ok := h.inflight[key]; ok {
 		h.mu.Unlock()
+		if joined != nil {
+			joined()
+		}
 		c.wg.Wait()
 		return c.res, true
 	}

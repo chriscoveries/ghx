@@ -29,7 +29,7 @@ func captured304(t *testing.T) []byte {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if fmt.Sprintf("%x", sha256.Sum256(raw)) != "c4534bfdda0147cd87d4c47fe779172d4171b775484e5bb3c6c1d8bfff0797e" {
+	if fmt.Sprintf("%x", sha256.Sum256(raw)) != "c4534bfdda0147cd87d4c47fe779172d4171b7754845e5bb3c6c1d8bfff0797e" {
 		t.Fatal("retained 304 bytes changed")
 	}
 	return raw
@@ -40,40 +40,54 @@ func captured304(t *testing.T) []byte {
 func TestUnionSingleflightLeaderAndFollower(t *testing.T) {
 	h := newTestHandler()
 	body := captured(t, "repository")
-	leader, shared := h.doSingleflightExec("leader", func() *executor.Result {
-		return &executor.Result{Stdout: body}
-	})
-	if shared || !bytes.Equal(leader.Stdout, body) {
-		t.Fatal("singleflight leader did not complete with the retained body")
+	started, release, joined := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	defer close(release)
+	type outcome struct {
+		result *executor.Result
+		shared bool
 	}
-
-	// Seed a real in-flight waitgroup, hold its leader until the follower has
-	// started, then publish the captured body before releasing the waiter.
-	c := &call{}
-	c.wg.Add(1)
-	h.mu.Lock()
-	h.inflight["follower"] = c
-	h.mu.Unlock()
-	started, finished := make(chan struct{}), make(chan *executor.Result, 1)
-	joined := make(chan bool, 1)
-	go func() {
+	leaderDone, followerDone := make(chan outcome, 1), make(chan outcome, 1)
+	var calls atomic.Int32
+	execute := func() *executor.Result {
+		calls.Add(1)
 		close(started)
-		result, coalesced := h.doSingleflightExec("follower", func() *executor.Result {
-			return &executor.Result{ExitCode: 1}
-		})
-		joined <- coalesced
-		finished <- result
+		<-release
+		return &executor.Result{Stdout: body}
+	}
+	go func() {
+		result, shared := h.doSingleflightExec("same-key", execute)
+		leaderDone <- outcome{result, shared}
 	}()
 	<-started
-	c.res = &executor.Result{Stdout: body}
-	c.wg.Done()
+	go func() {
+		result, shared := h.doSingleflightExecWithJoin("same-key", execute, func() { close(joined) })
+		followerDone <- outcome{result, shared}
+	}()
 	select {
-	case result := <-finished:
-		if !<-joined || !bytes.Equal(result.Stdout, body) {
-			t.Fatal("follower did not join the published result")
-		}
+	case <-joined:
+	case <-time.After(5 * time.Second):
+		t.Fatal("follower did not join the blocked leader")
+	}
+	select {
+	case <-followerDone:
+		t.Fatal("follower completed before the leader was released")
+	default:
+	}
+	release <- struct{}{}
+	var leader, follower outcome
+	select {
+	case leader = <-leaderDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("leader did not complete")
+	}
+	select {
+	case follower = <-followerDone:
 	case <-time.After(5 * time.Second):
 		t.Fatal("follower did not complete")
+	}
+	if calls.Load() != 1 || leader.shared || !follower.shared || leader.result == nil || follower.result == nil ||
+		!bytes.Equal(leader.result.Stdout, body) || !bytes.Equal(follower.result.Stdout, body) {
+		t.Fatal("singleflight leader and joined follower did not share the retained result")
 	}
 }
 
@@ -159,6 +173,9 @@ func TestUnionConditionalListInvalidationRefusesWithoutFallback(t *testing.T) {
 	if result == nil || result.ExitCode == 0 || result.Cached || calls.Load() != 1 || h.cache.Peek(key) != nil {
 		t.Fatal("straddled 304 must refuse without returning, restoring, or refetching the old body")
 	}
+	if stats := h.stats.Snapshot(0, 100); stats.Total != 1 || stats.Misses != 1 || stats.Revalidated != 0 {
+		t.Fatalf("refused list revalidation metrics = %+v", stats)
+	}
 }
 
 func TestUnionConditionalGETInvalidationRefusesWithoutFallback(t *testing.T) {
@@ -180,6 +197,9 @@ func TestUnionConditionalGETInvalidationRefusesWithoutFallback(t *testing.T) {
 	result := h.Handle(req)
 	if result == nil || result.ExitCode == 0 || result.Cached || calls.Load() != 1 || h.cache.Peek(key) != nil {
 		t.Fatal("straddled conditional GET must refuse without returning, restoring, or refetching the old body")
+	}
+	if stats := h.stats.Snapshot(0, 100); stats.Total != 1 || stats.Misses != 1 || stats.Revalidated != 0 {
+		t.Fatalf("refused GET revalidation metrics = %+v", stats)
 	}
 }
 
@@ -214,5 +234,8 @@ func TestUnionConditionalListAcceptsObservedGh304Exit(t *testing.T) {
 	result := h.Handle(req)
 	if result == nil || result.ExitCode != 0 || !result.Cached || !bytes.Equal(result.Stdout, want) || calls.Load() != 1 {
 		t.Fatal("observed gh exit 1 with a 304 should refresh the matching retained body without fallback")
+	}
+	if stats := h.stats.Snapshot(1, 100); stats.Total != 1 || stats.Revalidated != 1 {
+		t.Fatalf("successful list revalidation metrics = %+v", stats)
 	}
 }
