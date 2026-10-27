@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -19,6 +20,17 @@ import (
 	"github.com/brunoborges/ghx/src/internal/protocol"
 	"github.com/brunoborges/ghx/src/internal/resource"
 )
+
+const recordedValidator = `W/"6329ed53d22e2529639603a464d9395ad859fc88b4ec0d6adb12335fba5bb5ce"`
+
+func awaitSignal(t *testing.T, signal <-chan struct{}, phase string) {
+	t.Helper()
+	select {
+	case <-signal:
+	case <-time.After(5 * time.Second):
+		t.Fatalf("timed out waiting for %s", phase)
+	}
+}
 
 // This real 304 was captured for issue #140, not the list or repository below.
 // Tests use its protocol/exit bytes with a separately retained body solely as
@@ -41,7 +53,9 @@ func TestUnionSingleflightLeaderAndFollower(t *testing.T) {
 	h := newTestHandler()
 	body := captured(t, "repository")
 	started, release, joined := make(chan struct{}), make(chan struct{}), make(chan struct{})
-	defer close(release)
+	var releaseOnce sync.Once
+	releaseLeader := func() { releaseOnce.Do(func() { close(release) }) }
+	defer releaseLeader()
 	type outcome struct {
 		result *executor.Result
 		shared bool
@@ -58,7 +72,7 @@ func TestUnionSingleflightLeaderAndFollower(t *testing.T) {
 		result, shared := h.doSingleflightExec("same-key", execute)
 		leaderDone <- outcome{result, shared}
 	}()
-	<-started
+	awaitSignal(t, started, "singleflight leader start")
 	go func() {
 		result, shared := h.doSingleflightExecWithJoin("same-key", execute, func() { close(joined) })
 		followerDone <- outcome{result, shared}
@@ -73,7 +87,7 @@ func TestUnionSingleflightLeaderAndFollower(t *testing.T) {
 		t.Fatal("follower completed before the leader was released")
 	default:
 	}
-	release <- struct{}{}
+	releaseLeader()
 	var leader, follower outcome
 	select {
 	case leader = <-leaderDone:
@@ -95,6 +109,9 @@ func TestUnionNormalizedPostInvalidateStartsNewFlight(t *testing.T) {
 	h := newTestHandler()
 	oldBody, newBody := captured(t, "pr21"), captured(t, "pr22")
 	started, release := make(chan struct{}), make(chan struct{})
+	var releaseOnce sync.Once
+	releaseOld := func() { releaseOnce.Do(func() { close(release) }) }
+	defer releaseOld()
 	var calls atomic.Int32
 	h.execute = func(_ context.Context, _ string, _ []string, _ string, _ authenv.Environment) *executor.Result {
 		if calls.Add(1) == 1 {
@@ -112,7 +129,7 @@ func TestUnionNormalizedPostInvalidateStartsNewFlight(t *testing.T) {
 		h.store(key, "pr_view", allowlist.Classification{}, req, result, version)
 		close(oldDone)
 	}()
-	<-started
+	awaitSignal(t, started, "old normalized flight start")
 	h.cache.Invalidate(func(*cache.Entry) bool { return true })
 	type outcome struct {
 		result    *executor.Result
@@ -127,18 +144,18 @@ func TestUnionNormalizedPostInvalidateStartsNewFlight(t *testing.T) {
 	select {
 	case fresh := <-freshDone:
 		if fresh.coalesced || !bytes.Equal(fresh.result.Stdout, newBody) {
-			close(release)
-			<-oldDone
+			releaseOld()
+			awaitSignal(t, oldDone, "old normalized flight cleanup")
 			t.Fatal("post-invalidation caller joined the old flight")
 		}
 		h.store(key, "pr_view", allowlist.Classification{}, req, fresh.result, fresh.version)
 	case <-time.After(5 * time.Second):
-		close(release)
-		<-oldDone
+		releaseOld()
+		awaitSignal(t, oldDone, "old normalized flight cleanup")
 		t.Fatal("post-invalidation caller waited for the old flight")
 	}
-	close(release)
-	<-oldDone
+	releaseOld()
+	awaitSignal(t, oldDone, "old normalized flight completion")
 	if entry := h.cache.Get(key); entry == nil || !bytes.Equal(entry.Stdout, newBody) || calls.Load() != 2 {
 		t.Fatal("old flight replaced the fresh retained body")
 	}
@@ -159,11 +176,11 @@ func TestUnionConditionalListInvalidationRefusesWithoutFallback(t *testing.T) {
 		t.Fatal(err)
 	}
 	key := execctx.CacheKey(s.Context, s.Args)
-	h.cache.Set(&cache.Entry{Key: key, Stdout: body, ETag: `"etag-1"`, CachedAt: time.Now().Add(-time.Hour), TTL: time.Minute})
+	h.cache.Set(&cache.Entry{Key: key, Stdout: body, ETag: recordedValidator, CachedAt: time.Now().Add(-time.Hour), TTL: time.Minute})
 	var calls atomic.Int32
 	h.execute = func(_ context.Context, _ string, args []string, _ string, _ authenv.Environment) *executor.Result {
 		calls.Add(1)
-		if !strings.Contains(strings.Join(args, " "), "If-None-Match") {
+		if !strings.Contains(strings.Join(args, " "), "If-None-Match: "+recordedValidator) {
 			return &executor.Result{ExitCode: 1, Stderr: []byte("unexpected fallback")}
 		}
 		h.cache.Invalidate(func(*cache.Entry) bool { return true })
@@ -184,11 +201,11 @@ func TestUnionConditionalGETInvalidationRefusesWithoutFallback(t *testing.T) {
 	response304 := captured304(t)
 	req := &protocol.Request{Args: []string{"api", "repos/brunoborges/ghx"}, Context: execctx.ExecContext{Host: "github.com", Repo: "brunoborges/ghx", TokenHash: "identity"}}
 	key := execctx.CacheKey(req.Context, req.Args)
-	h.cache.Set(&cache.Entry{Key: key, Stdout: body, ETag: `W/"captured"`, TTL: time.Second, CachedAt: time.Now().Add(-time.Minute)})
+	h.cache.Set(&cache.Entry{Key: key, Stdout: body, ETag: recordedValidator, TTL: time.Second, CachedAt: time.Now().Add(-time.Minute)})
 	var calls atomic.Int32
 	h.execute = func(_ context.Context, _ string, args []string, _ string, _ authenv.Environment) *executor.Result {
 		calls.Add(1)
-		if !strings.Contains(strings.Join(args, " "), "If-None-Match") {
+		if !strings.Contains(strings.Join(args, " "), "If-None-Match: "+recordedValidator) {
 			return &executor.Result{ExitCode: 1, Stderr: []byte("unexpected fallback")}
 		}
 		h.cache.Invalidate(func(*cache.Entry) bool { return true })
@@ -222,11 +239,11 @@ func TestUnionConditionalListAcceptsObservedGh304Exit(t *testing.T) {
 		t.Fatal(err)
 	}
 	key := execctx.CacheKey(s.Context, s.Args)
-	h.cache.Set(&cache.Entry{Key: key, Stdout: body, ETag: `"etag-1"`, CachedAt: time.Now().Add(-time.Hour), TTL: time.Minute})
+	h.cache.Set(&cache.Entry{Key: key, Stdout: body, ETag: recordedValidator, CachedAt: time.Now().Add(-time.Hour), TTL: time.Minute})
 	var calls atomic.Int32
 	h.execute = func(_ context.Context, _ string, args []string, _ string, _ authenv.Environment) *executor.Result {
 		calls.Add(1)
-		if !strings.Contains(strings.Join(args, " "), "If-None-Match") {
+		if !strings.Contains(strings.Join(args, " "), "If-None-Match: "+recordedValidator) {
 			return &executor.Result{ExitCode: 1, Stderr: []byte("unexpected fallback")}
 		}
 		return &executor.Result{Stdout: response304, ExitCode: 1}
