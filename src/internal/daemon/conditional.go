@@ -63,6 +63,9 @@ func (h *Handler) refreshConditional(req *protocol.Request, key string, start ti
 			tag = ""
 		}
 		if response.StatusCode == http.StatusNotModified {
+			if r.ExitCode != 0 && r.ExitCode != 1 {
+				return r
+			}
 			if old == nil || old.ETag == "" {
 				return h.execGH(req.Args, req.WorkDir, req.AuthEnv)
 			}

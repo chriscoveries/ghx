@@ -3,6 +3,9 @@ package daemon
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"fmt"
+	"os"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -16,6 +19,21 @@ import (
 	"github.com/brunoborges/ghx/src/internal/protocol"
 	"github.com/brunoborges/ghx/src/internal/resource"
 )
+
+// This real 304 was captured for issue #140, not the list or repository below.
+// Tests use its protocol/exit bytes with a separately retained body solely as
+// an explicit transport control; this is not a claimed live endpoint exchange.
+func captured304(t *testing.T) []byte {
+	t.Helper()
+	raw, err := os.ReadFile("../../../testdata/api-throttle/issue140-conditional.http")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fmt.Sprintf("%x", sha256.Sum256(raw)) != "c4534bfdda0147cd87d4c47fe779172d4171b775484e5bb3c6c1d8bfff0797e" {
+		t.Fatal("retained 304 bytes changed")
+	}
+	return raw
+}
 
 // The bodies come from the public captured ghx repository fixture. Channels
 // and invalidation are explicit schedule controls, not new API observations.
@@ -115,6 +133,7 @@ func TestUnionNormalizedPostInvalidateStartsNewFlight(t *testing.T) {
 func TestUnionConditionalListInvalidationRefusesWithoutFallback(t *testing.T) {
 	h := newTestHandler()
 	h.cfg.ResourceViews = true
+	response304 := captured304(t)
 	req := &protocol.Request{Args: []string{"run", "list", "--json", "databaseId,status,conclusion", "-L", "1"},
 		Context: execctx.ExecContext{Host: "github.com", Repo: "chriscoveries/cifast", TokenHash: "identity"}}
 	s := resource.PrepareList(req.Context, req.Args)
@@ -134,7 +153,7 @@ func TestUnionConditionalListInvalidationRefusesWithoutFallback(t *testing.T) {
 			return &executor.Result{ExitCode: 1, Stderr: []byte("unexpected fallback")}
 		}
 		h.cache.Invalidate(func(*cache.Entry) bool { return true })
-		return &executor.Result{Stdout: httpResponse("304 Not Modified", `"etag-1"`, "")}
+		return &executor.Result{Stdout: response304, ExitCode: 1}
 	}
 	result := h.Handle(req)
 	if result == nil || result.ExitCode == 0 || result.Cached || calls.Load() != 1 || h.cache.Peek(key) != nil {
@@ -145,6 +164,7 @@ func TestUnionConditionalListInvalidationRefusesWithoutFallback(t *testing.T) {
 func TestUnionConditionalGETInvalidationRefusesWithoutFallback(t *testing.T) {
 	h := newTestHandler()
 	body := captured(t, "repository")
+	response304 := captured304(t)
 	req := &protocol.Request{Args: []string{"api", "repos/brunoborges/ghx"}, Context: execctx.ExecContext{Host: "github.com", Repo: "brunoborges/ghx", TokenHash: "identity"}}
 	key := execctx.CacheKey(req.Context, req.Args)
 	h.cache.Set(&cache.Entry{Key: key, Stdout: body, ETag: `W/"captured"`, TTL: time.Second, CachedAt: time.Now().Add(-time.Minute)})
@@ -155,10 +175,44 @@ func TestUnionConditionalGETInvalidationRefusesWithoutFallback(t *testing.T) {
 			return &executor.Result{ExitCode: 1, Stderr: []byte("unexpected fallback")}
 		}
 		h.cache.Invalidate(func(*cache.Entry) bool { return true })
-		return &executor.Result{Stdout: httpOutput(nil, 304, "")}
+		return &executor.Result{Stdout: response304, ExitCode: 1}
 	}
 	result := h.Handle(req)
 	if result == nil || result.ExitCode == 0 || result.Cached || calls.Load() != 1 || h.cache.Peek(key) != nil {
 		t.Fatal("straddled conditional GET must refuse without returning, restoring, or refetching the old body")
+	}
+}
+
+func TestUnionConditionalListAcceptsObservedGh304Exit(t *testing.T) {
+	h := newTestHandler()
+	h.cfg.ResourceViews = true
+	response304 := captured304(t)
+	req := &protocol.Request{Args: []string{"run", "list", "--json", "databaseId,status,conclusion", "-L", "1"},
+		Context: execctx.ExecContext{Host: "github.com", Repo: "chriscoveries/cifast", TokenHash: "identity"}}
+	s := resource.PrepareList(req.Context, req.Args)
+	if s == nil {
+		t.Fatal("retained list request has no resource shape")
+	}
+	body, err := translateRuns([]byte(runsCollection), strings.Split(resource.ListFields(s.Kind), ","))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := s.Project(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := execctx.CacheKey(s.Context, s.Args)
+	h.cache.Set(&cache.Entry{Key: key, Stdout: body, ETag: `"etag-1"`, CachedAt: time.Now().Add(-time.Hour), TTL: time.Minute})
+	var calls atomic.Int32
+	h.execute = func(_ context.Context, _ string, args []string, _ string, _ authenv.Environment) *executor.Result {
+		calls.Add(1)
+		if !strings.Contains(strings.Join(args, " "), "If-None-Match") {
+			return &executor.Result{ExitCode: 1, Stderr: []byte("unexpected fallback")}
+		}
+		return &executor.Result{Stdout: response304, ExitCode: 1}
+	}
+	result := h.Handle(req)
+	if result == nil || result.ExitCode != 0 || !result.Cached || !bytes.Equal(result.Stdout, want) || calls.Load() != 1 {
+		t.Fatal("observed gh exit 1 with a 304 should refresh the matching retained body without fallback")
 	}
 }

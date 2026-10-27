@@ -159,14 +159,16 @@ func (h *Handler) handleConditionalList(req *protocol.Request, s *resource.Shape
 		args = append(args, "--header", "If-None-Match: "+old.ETag)
 	}
 	r := h.execGH(args, req.WorkDir, req.AuthEnv)
-	if r.ExitCode != 0 {
-		return nil
-	}
 	response, err := http.ReadResponse(bufio.NewReader(bytes.NewReader(r.Stdout)), nil)
 	if err != nil {
 		return nil
 	}
 	defer response.Body.Close()
+	// gh reports an HTTP 304 as exit 1 even with --include; the retained
+	// fleet capture demonstrates that this is a valid revalidation response.
+	if r.ExitCode != 0 && !(r.ExitCode == 1 && response.StatusCode == http.StatusNotModified) {
+		return nil
+	}
 	body, err := io.ReadAll(response.Body)
 	if err != nil {
 		return nil
