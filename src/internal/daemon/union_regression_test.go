@@ -161,6 +161,42 @@ func TestUnionNormalizedPostInvalidateStartsNewFlight(t *testing.T) {
 	}
 }
 
+func TestUnionCacheAdmissionPreservesForkExitRules(t *testing.T) {
+	// Exit codes are transport controls on the retained body, not a claim that
+	// the captured endpoint produced either exit status.
+	body := captured(t, "pr21")
+	for _, tc := range []struct {
+		name       string
+		args       []string
+		exitCode   int
+		shouldHold bool
+	}{
+		{"error is not stored", []string{"pr", "view", "21"}, 1, false},
+		{"pending checks remain cacheable", []string{"pr", "checks", "21"}, 8, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newTestHandler()
+			var calls atomic.Int32
+			h.execute = func(context.Context, string, []string, string, authenv.Environment) *executor.Result {
+				calls.Add(1)
+				return &executor.Result{Stdout: body, ExitCode: tc.exitCode}
+			}
+			req := &protocol.Request{Args: tc.args, Context: execctx.ExecContext{Host: "github.com", Repo: "brunoborges/ghx"}}
+			first, second := h.Handle(req), h.Handle(req)
+			if first.ExitCode != tc.exitCode || second.ExitCode != tc.exitCode || second.Cached != tc.shouldHold {
+				t.Fatalf("responses = %+v, %+v", first, second)
+			}
+			want := int32(2)
+			if tc.shouldHold {
+				want = 1
+			}
+			if calls.Load() != want {
+				t.Fatalf("fetch calls = %d, want %d", calls.Load(), want)
+			}
+		})
+	}
+}
+
 func TestUnionConditionalListInvalidationRefusesWithoutFallback(t *testing.T) {
 	h := newTestHandler()
 	h.cfg.ResourceViews = true

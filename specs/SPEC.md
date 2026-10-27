@@ -205,7 +205,7 @@ ghx ghcli upgrade            # Download the latest GitHub CLI to ~/.ghx/bin/gh
 ### Per-Command Overrides
 
 ```bash
-ghx --no-cache pr list            # Skip lookup; store the fresh result for others
+ghx --no-cache pr list            # Bypass the cache for this call
 ghx --ttl 120 pr list             # Override TTL for this call
 GHX_TTL=120 ghx pr list           # Same, via env var
 GHX_NO_CACHE=1 ghx pr list        # Same as --no-cache, via env var

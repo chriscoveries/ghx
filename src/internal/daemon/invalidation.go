@@ -12,6 +12,10 @@ import (
 func (h *Handler) invalidateWrite(req *protocol.Request) {
 	d := resource.Identify(req.Context, req.Args)
 	collectionsOnly := len(req.Args) > 1 && req.Args[1] == "create"
+	h.invalidateDependency(d, collectionsOnly)
+}
+
+func (h *Handler) invalidateDependency(d resource.Identity, collectionsOnly bool) int {
 	count := h.cache.Invalidate(func(e *cache.Entry) bool {
 		if !strings.EqualFold(e.Host, d.Host) {
 			return false
@@ -43,4 +47,5 @@ func (h *Handler) invalidateWrite(req *protocol.Request) {
 		return d.ID == "" || e.ResourceID == "" || e.ResourceID == d.ID
 	})
 	h.stats.RecordInvalidation(count)
+	return count
 }

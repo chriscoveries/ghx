@@ -175,13 +175,8 @@ func (h *Handler) handleExec(req *protocol.Request) *protocol.Response {
 		latency := time.Since(start).Seconds() * 1000
 		h.record(req, nil, cmdKey, "", metrics.ResultPassthrough, latency)
 
-		if result.ExitCode == 0 {
-			h.invalidateWrite(req)
-		}
-		if classification.Resource != allowlist.ResourceUnknown {
-			host, repo := classification.Target(req.Context.Host, req.Context.Repo)
-			h.stats.RecordInvalidation(h.invalidate(host, repo, classification.Resource))
-		}
+		// A failed command may have partially changed remote state.
+		h.invalidateWrite(req)
 
 		return &protocol.Response{
 			Stdout:   result.Stdout,
@@ -216,16 +211,6 @@ func (h *Handler) handleExec(req *protocol.Request) *protocol.Response {
 	var baseKey string
 	if plan.Base != nil {
 		baseKey = execctx.CacheKey(kctx, plan.Base)
-	}
-
-	// --no-cache skips the lookup (and in-flight calls that may predate the
-	// request) but still stores the fresh result so other callers reuse it.
-	if req.NoCache {
-		result := h.execGH(plan.Fetch, req.WorkDir, req.AuthEnv)
-		h.record(req, plan.Fetch, cmdKey, cacheKey, metrics.ResultMiss, time.Since(start).Seconds()*1000)
-		h.store(cacheKey, cmdKey, classification, req, result, h.cache.Version())
-		h.indexFields(baseKey, cacheKey, plan.Fields)
-		return h.finish(plan, req, result, false)
 	}
 
 	// Check cache, then any entry that fetched a superset of the fields
@@ -373,6 +358,10 @@ func (h *Handler) lookupSuperset(baseKey string, fields []string) *executor.Resu
 }
 
 func (h *Handler) store(cacheKey, cmdKey string, classification allowlist.Classification, req *protocol.Request, result *executor.Result, version uint64) {
+	// Retain successful results and the gh pr checks pending status only.
+	if result.ExitCode != 0 && !(cmdKey == "pr_checks" && result.ExitCode == 8) {
+		return
+	}
 	ttl := h.cfg.CommandTTL(cmdKey)
 	if req.TTLOverride > 0 {
 		ttl = time.Duration(req.TTLOverride) * time.Second
@@ -384,17 +373,18 @@ func (h *Handler) store(cacheKey, cmdKey string, classification allowlist.Classi
 		}
 	}
 
-	host, repo := classification.Target(req.Context.Host, req.Context.Repo)
+	d := resource.Identify(req.Context, req.Args)
 	h.cache.SetVersion(&cache.Entry{
-		Key:      cacheKey,
-		Stdout:   result.Stdout,
-		Stderr:   result.Stderr,
-		ExitCode: result.ExitCode,
-		CachedAt: time.Now(),
-		TTL:      ttl,
-		Resource: classification.Resource,
-		Host:     host,
-		Repo:     repo,
+		Key:        cacheKey,
+		Stdout:     result.Stdout,
+		Stderr:     result.Stderr,
+		ExitCode:   result.ExitCode,
+		CachedAt:   time.Now(),
+		TTL:        ttl,
+		Resource:   allowlist.ResourceType(d.Kind),
+		ResourceID: d.ID,
+		Host:       d.Host,
+		Repo:       d.Repo,
 	}, version)
 }
 
@@ -486,7 +476,9 @@ func (h *Handler) handleStats() *protocol.Response {
 
 func (h *Handler) handleFlush(req *protocol.Request) *protocol.Response {
 	var count int
-	if req.Resource == allowlist.ResourceUnknown {
+	if req.Dependency != nil {
+		count = h.invalidateDependency(*req.Dependency, req.CollectionsOnly)
+	} else if req.Resource == allowlist.ResourceUnknown {
 		count = h.cache.Flush()
 	} else {
 		count = h.invalidate(req.Context.Host, req.Context.Repo, req.Resource)

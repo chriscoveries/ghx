@@ -295,13 +295,13 @@ This happens automatically — no configuration needed. The coalesced count is v
 ### Per-command options
 
 ```bash
-ghx --no-cache pr list ...     # Fetch fresh data, refreshing the shared cache entry
+ghx --no-cache pr list ...     # Fetch directly without changing the shared entry
 ghx --ttl 120 pr list ...      # Override TTL to 120 seconds
 GHX_NO_CACHE=1 ghx pr list ... # Same via env var
 GHX_TTL=60 ghx pr list ...     # Same via env var
 ```
 
-`--no-cache` skips the lookup but stores the fresh result, so other callers polling the same command benefit from it.
+`--no-cache` bypasses shared cache lookup and storage for that call; it does not refresh an existing shared entry.
 
 Environment overrides work without a config file and take precedence over YAML values.
 
@@ -416,7 +416,7 @@ Only explicitly allowlisted read-only commands are cached:
 | `gh run watch/download` | ❌ (always passthrough) |
 | `gh auth/config/codespace/secret` | ❌ (always passthrough) |
 
-Mutations run in the invoking client, preserving stdin, stdout, stderr, and terminal prompts. After the command exits, ghx invalidates related cache entries, including when `--no-cache` is used or the command fails after a partial write. For example, `ghx pr merge 42` flushes all cached PR entries and cached `gh api` responses for that repo; an `api` write flushes the whole repo. Mutations with `-R owner/repo` invalidate that repository rather than the current checkout. A mutation never starts a daemon solely to invalidate an empty cache. Older daemons safely flush the whole cache when receiving the scoped invalidation request.
+Mutations run in the invoking client, preserving stdin, stdout, stderr, and terminal prompts. After the command exits, ghx invalidates related cache entries, including when `--no-cache` is used or the command fails after a partial write. For example, `ghx pr merge 42` invalidates that PR, related issue/API entries and relevant collections; ambiguous writes invalidate more broadly. Mutations with `-R owner/repo` invalidate that repository rather than the current checkout. A mutation never starts a daemon solely to invalidate an empty cache. Older daemons safely flush the whole cache when receiving the scoped invalidation request.
 
 API requests are cached only when their effective method is GET. Fields imply POST unless the method is explicitly GET; GraphQL, input bodies, file-backed fields, and unknown options bypass caching. These requests are never coalesced. An invalidation failure prints a warning and preserves the mutation's exit code; the mutation is never retried.
 

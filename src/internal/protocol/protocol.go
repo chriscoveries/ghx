@@ -11,6 +11,7 @@ import (
 	"github.com/brunoborges/ghx/src/internal/allowlist"
 	"github.com/brunoborges/ghx/src/internal/authenv"
 	execctx "github.com/brunoborges/ghx/src/internal/context"
+	"github.com/brunoborges/ghx/src/internal/resource"
 )
 
 // Request is sent from the ghx client to the ghxd daemon.
@@ -40,6 +41,11 @@ type Request struct {
 	// Resource scopes a flush to Context.Host/Repo. Older daemons ignore it
 	// and safely flush the whole cache; mutation payloads never cross IPC.
 	Resource allowlist.ResourceType `json:"resource,omitempty"`
+
+	// Dependency contains only a parsed resource identity, never mutation
+	// arguments or input. Resource remains empty for older daemon global flush.
+	Dependency      *resource.Identity `json:"dependency,omitempty"`
+	CollectionsOnly bool               `json:"collections_only,omitempty"`
 }
 
 type RequestType string

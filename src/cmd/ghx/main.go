@@ -19,6 +19,7 @@ import (
 	execctx "github.com/brunoborges/ghx/src/internal/context"
 	"github.com/brunoborges/ghx/src/internal/ghcli"
 	"github.com/brunoborges/ghx/src/internal/protocol"
+	"github.com/brunoborges/ghx/src/internal/resource"
 )
 
 var version = "dev"
@@ -57,19 +58,26 @@ func main() {
 	// Resolve real gh binary (lazy — only on execution path)
 	mustResolveGH(cfg)
 
-	// The daemon protocol does not carry stdin. Keep input in the caller process,
-	// including implicit stdin consumers and extensions, before resolving context
-	// or contacting the daemon. These calls must never be cached or coalesced.
-	if readsStdin(ghArgs, os.Stdin) {
-		execDirect(cfg.GHPath, ghArgs)
-		return
-	}
-
 	// Short-circuit: passthrough commands (e.g. auth login, config, codespace) are
 	// interactive or otherwise unsuitable for the daemon. Execute gh directly so the
 	// user gets a full TTY and no IPC timeout can occur.
 	classifier := allowlist.NewClassifier(cfg.AdditionalCache)
 	classification := classifier.Classify(ghArgs)
+	// Mutations keep stdin in the invoking process but must still invalidate
+	// after a possibly partial write. Other stdin consumers remain direct.
+	if classification.Type == allowlist.Mutation {
+		ctx := execctx.Resolve(cfg.GHPath)
+		identity := resource.Identify(ctx, ghArgs)
+		cmd := exec.Command(cfg.GHPath, ghArgs...)
+		cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
+		req := &protocol.Request{Type: protocol.TypeFlush, Dependency: &identity,
+			CollectionsOnly: len(ghArgs) > 1 && ghArgs[1] == "create"}
+		os.Exit(runMutation(cmd, req, client.New(cfg.SocketPath).Send))
+	}
+	if readsStdin(ghArgs, os.Stdin) {
+		execDirect(cfg.GHPath, ghArgs)
+		return
+	}
 	if (len(ghArgs) > 1 && ghArgs[0] == "api" && strings.TrimPrefix(ghArgs[1], "/") == "rate_limit") || classification.Type == allowlist.Passthrough {
 		execDirect(cfg.GHPath, ghArgs)
 		return
@@ -77,14 +85,6 @@ func main() {
 
 	// Resolve execution context
 	ctx := execctx.Resolve(cfg.GHPath)
-	if classification.Type == allowlist.Mutation {
-		cmd := exec.Command(cfg.GHPath, ghArgs...)
-		cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
-		ctx.Host, ctx.Repo = classification.Target(ctx.Host, ctx.Repo)
-		req := &protocol.Request{Type: protocol.TypeFlush, Context: ctx, Resource: classification.Resource}
-		os.Exit(runMutation(cmd, req, client.New(cfg.SocketPath).Send))
-	}
-
 	// Connect to daemon, auto-starting if needed
 	cl := client.New(cfg.SocketPath)
 	if ready, err := ensureDaemon(cfg, cl); !ready {

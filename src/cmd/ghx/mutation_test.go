@@ -181,7 +181,8 @@ func TestMainMutationUsesNativeStdinAndFlush(t *testing.T) {
 			if mode != "no daemon" {
 				select {
 				case req := <-requests:
-					if req.Type != protocol.TypeFlush || req.Resource != allowlist.ResourcePR ||
+					if req.Type != protocol.TypeFlush || req.Resource != allowlist.ResourceUnknown ||
+						req.Dependency == nil || req.Dependency.Kind != "pr" || req.Dependency.ID != "1" ||
 						len(req.Args) != 0 || len(req.AuthEnv) != 0 {
 						t.Fatalf("mutation was sent through IPC: %+v", req)
 					}

@@ -170,8 +170,37 @@ func TestPreciseWriteInvalidation(t *testing.T) {
 		})
 	}
 }
-func TestFailedWriteRetainsCacheAndCreateOnlyEvictsCollections(t *testing.T) {
-	h, _, _ := resourceHandler(t)
+
+func TestStructuredMutationFlushKeepsDependencySemantics(t *testing.T) {
+	h, body, _ := resourceHandler(t)
+	request := view("number")
+	h.Handle(request)
+	shape := resource.Prepare(request.Context, request.Args)
+	key := execctx.CacheKey(shape.Context, shape.Args)
+	// Reuse the retained response bytes; resource metadata is a dependency
+	// control and does not claim these were separately observed endpoints.
+	for _, entry := range []cache.Entry{
+		{Key: "related-issue", Host: shape.Context.Host, Repo: shape.Context.Repo, Resource: allowlist.ResourceIssue, ResourceID: shape.ID},
+		{Key: "search", Host: shape.Context.Host, Resource: allowlist.ResourceSearch},
+		{Key: "other-object", Host: shape.Context.Host, Repo: shape.Context.Repo, Resource: allowlist.ResourcePR, ResourceID: "22"},
+	} {
+		entry.Stdout, entry.CachedAt, entry.TTL = body, time.Now(), time.Hour
+		h.cache.Set(&entry)
+	}
+	identity := resource.Identify(request.Context, []string{"pr", "edit", "21"})
+	h.Handle(&protocol.Request{Type: protocol.TypeFlush, Dependency: &identity})
+	for _, removed := range []string{key, "related-issue", "search"} {
+		if h.cache.Peek(removed) != nil {
+			t.Errorf("mutation flush retained dependent entry %s", removed)
+		}
+	}
+	if h.cache.Peek("other-object") == nil {
+		t.Fatal("precise mutation flush removed unrelated object")
+	}
+}
+
+func TestFailedWriteInvalidatesAndCreateOnlyEvictsCollections(t *testing.T) {
+	h, body, _ := resourceHandler(t)
 	h.Handle(view("number"))
 	req := view("number")
 	req.Args = []string{"pr", "edit", "21"}
@@ -179,12 +208,16 @@ func TestFailedWriteRetainsCacheAndCreateOnlyEvictsCollections(t *testing.T) {
 		return &executor.Result{ExitCode: 1}
 	}
 	h.Handle(req)
-	if !h.Handle(view("number")).Cached {
-		t.Fatal("failed write evicted state")
+	if h.Handle(view("number")).Cached {
+		t.Fatal("failed write left potentially stale state")
 	}
-	h.execute = func(context.Context, string, []string, string, authenv.Environment) *executor.Result {
+	h.execute = func(_ context.Context, _ string, args []string, _ string, _ authenv.Environment) *executor.Result {
+		if len(args) > 1 && args[0] == "pr" && args[1] == "view" {
+			return &executor.Result{Stdout: body}
+		}
 		return &executor.Result{}
 	}
+	h.Handle(view("number"))
 	h.cache.Set(&cache.Entry{Key: "list", Host: req.Context.Host, Repo: req.Context.Repo, Resource: allowlist.ResourcePR, TTL: time.Hour, CachedAt: time.Now()})
 	req.Args = []string{"pr", "create"}
 	h.Handle(req)

@@ -33,7 +33,7 @@ the native path. GraphQL is conservatively uncached; implicit POST and attached
 or equals-form method flags are recognized as writes. `ghx xcache stats` reports
 304 revalidations separately. They count as body reuse, and still make a request.
 
-Successful writes invalidate the addressed numeric object, its collections and
+Writes, including failures that may be partial, invalidate the addressed numeric object, its collections and
 related issue/PR API dependencies, across credential identities. Explicit `-R`
 and URL selectors resolve the invalidation repository. Other repositories and
 numeric objects survive. Creates evict collections while preserving existing

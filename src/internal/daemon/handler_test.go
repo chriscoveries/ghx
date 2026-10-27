@@ -449,24 +449,27 @@ func TestHandlerInvalidationCrossesAPINamespace(t *testing.T) {
 	}
 }
 
-func TestHandlerNoCacheRefreshesSharedEntry(t *testing.T) {
+func TestHandlerNoCacheBypassesWithoutReplacingSharedEntry(t *testing.T) {
 	h := newTestHandler()
-	value, calls := "v1", 0
+	// Two retained PR bodies are used as a response-order control, not as a
+	// claimed pair of observations of the same endpoint.
+	before, fresh := captured(t, "pr21"), captured(t, "pr22")
+	value, calls := before, 0
 	h.execute = func(context.Context, string, []string, string, authenv.Environment) *executor.Result {
 		calls++
-		return &executor.Result{Stdout: []byte(value)}
+		return &executor.Result{Stdout: value}
 	}
 	ctx := execctx.ExecContext{Host: "github.com", Repo: "owner/repo"}
 	read := func(noCache bool) *protocol.Response {
-		return h.Handle(&protocol.Request{Type: protocol.TypeExec, Args: []string{"run", "view", "7"}, Context: ctx, NoCache: noCache})
+		return h.Handle(&protocol.Request{Type: protocol.TypeExec, Args: []string{"pr", "view", "21"}, Context: ctx, NoCache: noCache})
 	}
 	read(false)
-	value = "v2"
-	if got := read(true); got.Cached || string(got.Stdout) != "v2" {
-		t.Fatalf("no-cache read = %+v, want fresh v2", got)
+	value = fresh
+	if got := read(true); got.Cached || !bytes.Equal(got.Stdout, fresh) {
+		t.Fatalf("no-cache read = %+v, want fresh response", got)
 	}
-	if got := read(false); !got.Cached || string(got.Stdout) != "v2" {
-		t.Fatalf("follow-up read = %+v, want cached v2", got)
+	if got := read(false); !got.Cached || !bytes.Equal(got.Stdout, before) {
+		t.Fatalf("follow-up read = %+v, want original cached response", got)
 	}
 	if calls != 2 {
 		t.Fatalf("executions = %d, want 2", calls)
