@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/brunoborges/ghx/src/internal/allowlist"
+	"github.com/brunoborges/ghx/src/internal/protocol"
 )
 
 // Entry is a cached response.
@@ -103,6 +104,14 @@ func (c *Cache) Get(key string) *Entry {
 	return entry
 }
 
+// Contains reports whether key holds a live entry without affecting LRU order.
+func (c *Cache) Contains(key string) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	elem, ok := c.items[key]
+	return ok && !elem.Value.(*storedEntry).entry.IsExpired()
+}
+
 // Set stores an entry in the cache.
 func (c *Cache) Set(entry *Entry) {
 	c.mu.Lock()
@@ -148,7 +157,8 @@ func (c *Cache) set(entry *Entry) {
 	}
 
 	bytes := int64(len(entry.Stdout)) + int64(len(entry.Stderr))
-	if c.maxSize <= 0 || c.maxBytes <= 0 || bytes > c.maxBytes {
+	if c.maxSize <= 0 || c.maxBytes <= 0 || bytes > c.maxBytes ||
+		!protocol.ExecResponseFits(entry.Stdout, entry.Stderr, entry.ExitCode) {
 		c.rejected++
 		return
 	}
@@ -158,7 +168,16 @@ func (c *Cache) set(entry *Entry) {
 		c.evictOldest()
 	}
 
-	elem := c.order.PushFront(&storedEntry{entry: entry, bytes: bytes})
+	stored := *entry
+	if entry.Stdout != nil {
+		stored.Stdout = make([]byte, len(entry.Stdout))
+		copy(stored.Stdout, entry.Stdout)
+	}
+	if entry.Stderr != nil {
+		stored.Stderr = make([]byte, len(entry.Stderr))
+		copy(stored.Stderr, entry.Stderr)
+	}
+	elem := c.order.PushFront(&storedEntry{entry: &stored, bytes: bytes})
 	c.items[entry.Key] = elem
 	c.bytes += bytes
 }
@@ -185,6 +204,24 @@ func (c *Cache) Invalidate(matches func(*Entry) bool) int {
 		}
 	}
 
+	for _, elem := range toRemove {
+		c.removeElement(elem)
+	}
+	return len(toRemove)
+}
+
+// InvalidateRepo removes all entries for the given host and repo, regardless of resource type.
+func (c *Cache) InvalidateRepo(host, repo string) int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	var toRemove []*list.Element
+	for elem := c.order.Front(); elem != nil; elem = elem.Next() {
+		entry := elem.Value.(*storedEntry).entry
+		if entry.Host == host && entry.Repo == repo {
+			toRemove = append(toRemove, elem)
+		}
+	}
 	for _, elem := range toRemove {
 		c.removeElement(elem)
 	}

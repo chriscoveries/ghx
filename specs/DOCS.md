@@ -65,6 +65,8 @@ This installs `ghx.exe` and `ghxd.exe` to `%LOCALAPPDATA%\ghx\bin` and adds it t
 
 ### Manual download
 
+Each release includes `checksums.txt` with SHA-256 hashes for the archives and `source.json`, which records the version, source commit, Go version, and target platforms. Each archive also contains `LICENSE` and the same `source.json`.
+
 Download the latest release for your platform from [GitHub Releases](https://github.com/brunoborges/ghx/releases):
 
 ```bash
@@ -249,20 +251,34 @@ After 30s:    ghx pr list ...   → 1.0s (TTL expired, fresh call)
 Each cached response is stored under a SHA-256 key computed from:
 
 - **Host** — the GitHub host (e.g., `github.com` or your GHES instance)
-- **Repository** — `owner/repo`
-- **Branch** — current Git branch
+- **Repository** — `owner/repo`, or the repository named by `-R`/`--repo` or an API path such as `repos/owner/repo/...`
+- **Branch** — current Git branch, only for commands whose output depends on it (e.g., `pr view` or `pr checks` without a PR number, `pr status`)
 - **Auth token hash** — SHA-256 fingerprint of your token (the token itself is never stored)
-- **Full command arguments** — every argument and flag, in order
+- **Command arguments** — every argument and flag, except output filters (see below)
 
-This means the **same command with different flags produces different cache entries**:
+Context the output cannot depend on is left out of the key, so `ghx run view 123`, `ghx pr view 42`, or `ghx api repos/o/r/pulls` run from different branches or checkouts share one entry. Commands that don't read the local repo at all (`search`, `gist`, `org list`, `repo list`, API paths without `{owner}`/`{repo}` placeholders) are shared across repositories.
+
+#### Output filters
+
+`--jq` and the order of `--json` fields don't change what gh fetches, so ghx caches the unfiltered response and applies the filter itself, using the same jq engine and output formatting as gh:
 
 ```bash
-ghx pr list --json number        # cache key A
-ghx pr list --json number,title  # cache key B (different flags)
-ghx pr list --json number        # cache hit on key A
+ghx pr view 42 --json title,state,number   # fetch, cache
+ghx pr view 42 --json number,state,title   # hit (same fields, different order)
+ghx pr view 42 --json state --jq .state    # hit (subset of cached fields, filtered)
+ghx api repos/o/r --jq .default_branch     # fetch, cache the full response
+ghx api repos/o/r --jq .stargazers_count   # hit
+ghx pr view 42 --json url                  # miss (field not cached yet)
 ```
 
-And the same command in **different repos or branches** also gets separate entries — no cross-context collisions.
+If a filter fails, or the command exits non-zero, ghx runs the original command directly so you see gh's exact output. `--template`, `api --paginate`, `api --include`, and filters that read `env`/`$ENV` are cached by their exact arguments instead.
+
+#### Longer-lived data
+
+Some responses can't go stale, so they are kept longer than the regular TTL (unless a `--ttl` or `ttl_overrides` entry applies):
+
+- **Commit-addressed content** — `api repos/o/r/commits/<sha>`, `git/commits|trees|blobs/<sha>`: `immutable_ttl` (default 1h)
+- **Completed runs and jobs** — `run view <id>` and `api repos/o/r/actions/runs|jobs/<id>` once they report `"status":"completed"`: `settled_ttl` (default 10m)
 
 #### Singleflight coalescing
 
@@ -279,11 +295,15 @@ This happens automatically — no configuration needed. The coalesced count is v
 ### Per-command options
 
 ```bash
-ghx --no-cache pr list ...     # Bypass cache for this call
+ghx --no-cache pr list ...     # Fetch fresh data, refreshing the shared cache entry
 ghx --ttl 120 pr list ...      # Override TTL to 120 seconds
 GHX_NO_CACHE=1 ghx pr list ... # Same via env var
 GHX_TTL=60 ghx pr list ...     # Same via env var
 ```
+
+`--no-cache` skips the lookup but stores the fresh result, so other callers polling the same command benefit from it.
+
+Environment overrides work without a config file and take precedence over YAML values.
 
 ## Daemon Management
 
@@ -296,6 +316,12 @@ ghx xdaemon restart        # Stop + start
 ```
 
 The daemon auto-starts on first `ghx` call. If the daemon can't start, `ghx` falls back to running `gh` directly — it never blocks you.
+
+Detached starts confirm a successful stats request before reporting success
+(up to 5 seconds). Restart waits up to 45 seconds for the previous daemon's
+listener and Unix instance lock to be released, allowing in-flight commands to
+drain before starting the replacement. If draining or startup times out, the
+command reports an error instead of claiming a successful restart.
 
 ## Cache Management
 
@@ -336,6 +362,14 @@ It shows:
 - **Per-command breakdown** with hit/miss rates and average latency
 - **Request log** — live tail of recent requests with cache result and timing
 
+By default the request log shows only the command name (e.g. `pr list`). To see the full
+arguments of each request — and, when `--jq`/`--json` normalization applies, the shape that
+was actually fetched from GitHub — opt in with `log_args: true` in `config.yaml` or
+`GHX_LOG_ARGS=1`. Arguments are kept in memory only (the last 200 requests) and are redacted
+before they are stored: header values (`-H`), request bodies (`--input`, `--body`,
+`--body-file`), sensitive-looking fields (`-f token=…`, `-f password=…`, `@file` values),
+and anything that looks like a GitHub token, JWT, or `Bearer`/`token` credential.
+
 The dashboard auto-refreshes every 2 seconds. No external dependencies — it's a single HTML page embedded in the binary.
 
 ### JSON API
@@ -347,6 +381,13 @@ curl http://localhost:9847/api/stats | jq .
 curl http://localhost:9847/api/log?limit=50 | jq .
 curl http://localhost:9847/api/ttl-analysis | jq .
 ```
+
+With `log_args` enabled, each `/api/log` entry also carries `args` (redacted) and, when it
+differs, `fetch` (the normalized command that was executed).
+
+The dashboard only answers requests addressed to a loopback host (`127.0.0.1`, `localhost`,
+`::1`), sends no CORS headers, and rejects state-changing requests (`/api/flush`,
+`/api/shutdown`) that carry a cross-site `Origin`. Local scripts like `curl` keep working.
 
 ## What Gets Cached
 
@@ -370,9 +411,14 @@ Only explicitly allowlisted read-only commands are cached:
 | `gh org list` | ✅ |
 | `gh pr create/merge/close/edit` | ❌ (mutation → invalidates PR cache) |
 | `gh issue create/edit/delete/close` | ❌ (mutation → invalidates issue cache) |
+| `gh workflow run`, `gh run rerun/cancel` | ❌ (mutation → invalidates run cache) |
+| `gh repo sync/rename/archive/fork`, `gh project item-*`, `gh label clone` | ❌ (mutation) |
+| `gh run watch/download` | ❌ (always passthrough) |
 | `gh auth/config/codespace/secret` | ❌ (always passthrough) |
 
-Mutations automatically invalidate related cache entries. For example, `gh pr merge 42` flushes all cached PR entries for that repo.
+Mutations run in the invoking client, preserving stdin, stdout, stderr, and terminal prompts. After the command exits, ghx invalidates related cache entries, including when `--no-cache` is used or the command fails after a partial write. For example, `ghx pr merge 42` flushes all cached PR entries and cached `gh api` responses for that repo; an `api` write flushes the whole repo. Mutations with `-R owner/repo` invalidate that repository rather than the current checkout. A mutation never starts a daemon solely to invalidate an empty cache. Older daemons safely flush the whole cache when receiving the scoped invalidation request.
+
+API requests are cached only when their effective method is GET. Fields imply POST unless the method is explicitly GET; GraphQL, input bodies, file-backed fields, and unknown options bypass caching. These requests are never coalesced. An invalidation failure prints a warning and preserves the mutation's exit code; the mutation is never retried.
 
 ### Custom Commands
 
@@ -471,6 +517,12 @@ ttl_overrides:
   issue_list: 60s
   run_list: 15s
 
+# TTL for commit-SHA-addressed API content (default: 1h)
+immutable_ttl: 1h
+
+# TTL for runs/jobs that report status "completed" (default: 10m)
+settled_ttl: 10m
+
 # Max cached entries before LRU eviction (default: 1000)
 max_cache_entries: 1000
 
@@ -482,6 +534,10 @@ dashboard_port: 9847
 
 # Auto-start daemon on first ghx call (default: true)
 auto_start: true
+
+# Show full (redacted) command arguments in the dashboard request log
+# (default: false; env: GHX_LOG_ARGS=1)
+log_args: false
 
 # Additional commands to cache
 additional_cacheable:
@@ -495,6 +551,12 @@ additional_cacheable:
 Both cache limits must be positive to retain responses. LRU eviction enforces both
 limits; oversized responses are returned normally but bypass storage. Replacing an
 entry with an oversized response discards its old value. `ghx xcache stats` and
+limits; responses exceeding the byte budget bypass storage but otherwise follow
+normal execution and transport handling. Responses whose encoded JSON exceeds
+the IPC limit of 10 MiB also bypass storage without evicting unrelated entries;
+this includes base64 expansion of stdout and stderr, plus JSON metadata. Replacing
+an entry with a rejected response discards its old value. `ghx xcache stats` and
+
 `/api/stats` report `cache_bytes`, `max_cache_bytes`, and `cache_rejected` so capacity
 pressure is visible. The byte limit covers response payloads; metadata is bounded
 separately by the entry limit, and executing commands still need working memory.
@@ -536,7 +598,9 @@ separately by the entry limit, and executing commands still need working memory.
 
 - Unix socket with `0600` permissions (owner-only access)
 - Auth tokens are never stored — only a SHA256 fingerprint is used in cache keys
-- Dashboard binds to `127.0.0.1` only (not accessible from network)
+- Dashboard binds to `127.0.0.1` only (not accessible from network), rejects non-loopback
+  `Host` headers (DNS rebinding), sends no CORS headers, and refuses cross-site POSTs
+- Command arguments are only recorded when `log_args` is enabled, and are redacted first
 - In-memory cache only (lost on daemon restart)
 - Each user runs their own isolated daemon
 
@@ -568,6 +632,11 @@ to send diagnostics to the journal. Stop an existing daemon with
 `systemctl --user enable --now ghxd`. Inspect failures with
 `journalctl --user -u ghxd`; restart with `systemctl --user restart ghxd`.
 Use the service manager to stop/restart a service-managed daemon.
+
+The unit sends the initial shutdown signal only to the daemon, allowing active
+`gh` subprocesses to finish. If shutdown exceeds 45 seconds, systemd forcibly
+terminates the remaining processes in the service's control group.
+
 
 Unix daemons hold a kernel lock for their socket's lifetime. A concurrent start
 fails with a diagnostic before changing the socket or PID file. The persistent

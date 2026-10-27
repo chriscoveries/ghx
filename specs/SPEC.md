@@ -50,14 +50,17 @@ A cache key is a composite of the **full execution context**, not just command a
 
 ```
 CacheKey = hash(
-    gh_command,          // normalized: sorted flags, resolved args
+    gh_command,          // args without --jq, with --json fields sorted
     resolved_host,       // github.com or GHE hostname
-    resolved_repo,       // owner/name (from CWD or GH_REPO)
-    resolved_branch,     // current branch (when command depends on it)
+    resolved_repo,       // owner/name (from CWD or GH_REPO; -R or the API path when given; omitted for repo-independent commands)
+    resolved_branch,     // current branch (only when the output depends on it)
     auth_token_hash,     // SHA256 of token (not the token itself)
-    output_format,       // --json fields, --jq, --template, or default
 )
 ```
+
+**Output filters**: `--jq` is applied by the daemon (gojq, matching gh's formatting) to the cached unfiltered response, so different filters over the same data share one entry. A `--json` request for a subset of fields already cached for the same command is projected from that entry. Filter errors and non-zero exits rerun the original command directly.
+
+**Lifetimes**: commit-SHA-addressed API content uses `immutable_ttl` (1h); `run view <id>` and Actions run/job API responses reporting `"status":"completed"` use `settled_ttl` (10m).
 
 **Context resolution**: The client (`ghx`) resolves the execution context before sending to the daemon:
 - Repo: `git remote get-url origin` or `GH_REPO` env var
@@ -136,11 +139,11 @@ All three agents get the same response
 
 ### Cache Invalidation
 
-**Coarse-grained, namespace-based invalidation.** After any mutating command passes through the daemon, all cached entries for the same `{host, repo, resource_type}` namespace are invalidated.
+**Coarse-grained, namespace-based invalidation.** After any mutating command exits in the invoking client, a flush request invalidates all cached entries for the same `{host, repo, resource_type}` namespace.
 
 Resource types: `pr`, `issue`, `run`, `workflow`, `release`, `label`, `repo`, `api`.
 
-Example: After `gh pr merge #42`, all cached entries tagged `{github.com, owner/repo, pr}` are evicted.
+Example: After `gh pr merge #42`, all cached entries tagged `{github.com, owner/repo, pr}` are evicted, along with `{github.com, owner/repo, api}`. API writes evict every entry for the repo. Mutations target the repo named by `-R`/`--repo` or the API path when present.
 
 This is intentionally conservative — it may over-invalidate, but it will never serve stale data after mutations.
 
@@ -202,7 +205,7 @@ ghx ghcli upgrade            # Download the latest GitHub CLI to ~/.ghx/bin/gh
 ### Per-Command Overrides
 
 ```bash
-ghx --no-cache pr list            # Bypass cache for this call
+ghx --no-cache pr list            # Skip lookup; store the fresh result for others
 ghx --ttl 120 pr list             # Override TTL for this call
 GHX_TTL=120 ghx pr list           # Same, via env var
 GHX_NO_CACHE=1 ghx pr list        # Same as --no-cache, via env var
@@ -284,17 +287,19 @@ A single self-contained HTML page (embedded in the Go binary via `embed`) with n
 
 **Dashboard sections:**
 
-1. **Overview** — real-time hit rate %, total requests, cache size, daemon uptime
+1. **Overview** — real-time hit rate %, total requests, cache size, daemon uptime, and daemon version (shown next to the title)
 2. **Per-Command Breakdown** — sortable table showing each command with hit count, miss count, hit rate, and average latency
-3. **Request Log** — scrollable live tail of recent requests (last 200) showing timestamp, command, cache hit/miss, and latency
+3. **Request Log** — scrollable live tail of recent requests (last 200) showing timestamp, command, cache hit/miss, and latency. With `log_args: true`, also shows the full redacted arguments and the normalized fetch command
 4. **TTL Analysis** — for each command, shows the median time between repeated identical requests, helping users pick the right TTL
 
 **JSON API** (consumed by the dashboard, also useful for scripting):
 
 ```
 GET /api/stats          → { uptime, total, hits, misses, passthrough, coalesced, cache_size, commands: [...] }
-GET /api/log?limit=200  → [ { timestamp, command, cache_result, latency_ms }, ... ]
+GET /api/log?limit=200  → [ { timestamp, command, cache_key, result, latency_ms, args?, fetch? }, ... ]
 ```
+
+`args`/`fetch` are present only when `log_args` is enabled. The HTTP server rejects requests whose `Host` is not loopback, emits no CORS headers, and rejects non-GET requests with a cross-site `Origin`.
 
 ## Configuration File
 
@@ -311,6 +316,10 @@ ttl_overrides:
   issue_list: 60s
   run_list: 15s
   api_get: 30s
+
+# Longer lifetimes for data that can't go stale
+immutable_ttl: 1h   # commit-SHA-addressed API content
+settled_ttl: 10m    # runs/jobs reporting status "completed"
 
 # Cache limits
 max_cache_entries: 1000
@@ -333,6 +342,9 @@ gh_path: /opt/homebrew/bin/gh
 
 # Logging
 log_file: ~/.ghx/ghxd.log
+
+# Show full (redacted) command args in the dashboard request log (env: GHX_LOG_ARGS)
+log_args: false
 ```
 
 ## GitHub CLI Resolution and Auto-Download
@@ -411,8 +423,8 @@ Staleness checks only apply to the managed binary. If `gh` was found in PATH or 
 2. **No token storage**: The daemon never stores auth tokens; it delegates to `gh` which manages its own auth. Only a SHA256 fingerprint of the token is used in cache keys
 3. **No cross-user sharing**: Each user runs their own daemon with their own cache
 4. **Cached data**: Responses may contain private repo data. The in-memory cache is ephemeral and protected by socket permissions
-5. **Dashboard binding**: Metrics/dashboard HTTP server binds to `127.0.0.1` only
-6. **Log hygiene**: Command arguments are logged, but response bodies are not logged by default
+5. **Dashboard binding**: Metrics/dashboard HTTP server binds to `127.0.0.1` only, rejects non-loopback `Host` headers (DNS rebinding), sends no CORS headers, and rejects cross-site `Origin` on POST endpoints
+6. **Log hygiene**: Response bodies are never logged. Full command arguments are recorded in the in-memory request log only when `log_args` is enabled, and are redacted first (header values, request bodies, sensitive `-f` fields, token/JWT patterns)
 
 ## Error Handling
 

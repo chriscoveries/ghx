@@ -4,16 +4,95 @@ on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: Version bump from the latest v* tag
+        type: choice
+        options: [patch, minor, major]
+        default: patch
+      version:
+        description: Explicit version (e.g. v2.0.0-rc.1); overrides bump
+        type: string
+        required: false
 
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
 
 jobs:
-  release:
+  prepare:
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      sha: ${{ steps.version.outputs.sha }}
     steps:
       - uses: actions/checkout@v4
         with:
+          fetch-depth: 0
+
+      - name: Resolve version
+        id: version
+        env:
+          EVENT: ${{ github.event_name }}
+          BUMP: ${{ inputs.bump }}
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          if [ "$EVENT" = "workflow_dispatch" ]; then
+            if [ "$GITHUB_REF" != "refs/heads/main" ]; then
+              echo "Manual releases must run from main (got $GITHUB_REF)" >&2
+              exit 1
+            fi
+            if [ -n "$INPUT_VERSION" ]; then
+              VERSION="$INPUT_VERSION"
+            else
+              # Ignore plugin-v* and pre-release tags when finding the latest version
+              LATEST=$(git tag -l 'v*' --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -1)
+              LATEST=${LATEST:-v0.0.0}
+              IFS=. read -r MAJOR MINOR PATCH <<< "${LATEST#v}"
+              case "$BUMP" in
+                major) VERSION="v$((MAJOR + 1)).0.0" ;;
+                minor) VERSION="v${MAJOR}.$((MINOR + 1)).0" ;;
+                *)     VERSION="v${MAJOR}.${MINOR}.$((PATCH + 1))" ;;
+              esac
+              echo "Latest release: $LATEST"
+            fi
+            if git rev-parse -q --verify "refs/tags/$VERSION" >/dev/null; then
+              echo "Tag $VERSION already exists" >&2
+              exit 1
+            fi
+          else
+            VERSION="$GITHUB_REF_NAME"
+          fi
+          if [[ ! "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$ ]]; then
+            echo "Invalid release version: $VERSION" >&2
+            exit 1
+          fi
+          echo "Releasing $VERSION from $(git rev-parse HEAD)" | tee -a "$GITHUB_STEP_SUMMARY"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+  ci:
+    needs: prepare
+    uses: ./.github/workflows/ci.yml
+    with:
+      ref: ${{ needs.prepare.outputs.sha }}
+
+  release:
+    needs: [prepare, ci]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ needs.prepare.outputs.version }}
+      SHA: ${{ needs.prepare.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
           fetch-depth: 0
 
       - uses: actions/setup-go@v5
@@ -46,6 +125,85 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
+=======
+      - name: Build release archives
+        id: build
+        run: |
+          LDFLAGS="-s -w -X main.version=${VERSION}"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "version_num=${VERSION#v}" >> "$GITHUB_OUTPUT"
+
+          platforms=(
+            "darwin/arm64"
+            "darwin/amd64"
+            "linux/amd64"
+            "linux/arm64"
+            "windows/amd64"
+            "windows/arm64"
+          )
+
+          mkdir dist
+          jq -n --arg version "$VERSION" \
+            --arg commit "$SHA" \
+            --arg go_version "$(go env GOVERSION)" \
+            --args '{version: $version, commit: $commit, go_version: $go_version, platforms: $ARGS.positional}' \
+            "${platforms[@]}" > dist/source.json
+
+          for platform in "${platforms[@]}"; do
+            GOOS="${platform%/*}"
+            GOARCH="${platform#*/}"
+            output="dist/ghx-${GOOS}-${GOARCH}"
+            mkdir "${output}"
+
+            EXE_SUFFIX=""
+            if [ "${GOOS}" = "windows" ]; then
+              EXE_SUFFIX=".exe"
+            fi
+
+            echo "Building ${GOOS}/${GOARCH}..."
+            CGO_ENABLED=0 GOOS=${GOOS} GOARCH=${GOARCH} go build -trimpath -buildvcs=true -ldflags "${LDFLAGS}" -o "${output}/ghx${EXE_SUFFIX}" ./src/cmd/ghx
+            CGO_ENABLED=0 GOOS=${GOOS} GOARCH=${GOARCH} go build -trimpath -buildvcs=true -ldflags "${LDFLAGS}" -o "${output}/ghxd${EXE_SUFFIX}" ./src/cmd/ghxd
+            cp LICENSE dist/source.json "${output}/"
+
+            if [ "${GOOS}" = "windows" ]; then
+              printf '@echo off\r\nrem ghx-shim: this script redirects gh commands through ghx for caching\r\nghx %%*\r\n' > "${output}/gh.cmd"
+              zip -j "${output}.zip" "${output}/"*
+            else
+              printf '#!/bin/sh\n# ghx-shim: this script redirects gh commands through ghx for caching\nexec ghx "$@"\n' > "${output}/gh"
+              chmod +x "${output}/gh"
+              tar -czf "${output}.tar.gz" -C "${output}" ghx ghxd gh LICENSE source.json
+            fi
+          done
+
+      - name: Compute checksums
+        id: checksums
+        run: |
+          cd dist || exit 1
+          sha256sum -- *.tar.gz *.zip source.json > checksums.txt
+          sha256sum --check checksums.txt
+
+          for platform in DARWIN_ARM64 DARWIN_AMD64 LINUX_AMD64 LINUX_ARM64; do
+            archive="ghx-$(echo "$platform" | tr '[:upper:]_' '[:lower:]-').tar.gz"
+            sum=$(awk -v name="$archive" '$2 == name {print $1}' checksums.txt)
+            test -n "$sum"
+            echo "SHA_${platform}=${sum}" >> "$GITHUB_OUTPUT"
+          done
+
+      - name: Create tag
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "$VERSION" -m "$VERSION" "$SHA"
+          git push origin "refs/tags/$VERSION"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.prepare.outputs.version }}
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+>>>>>>> upstream/main
           files: |
             dist/*.tar.gz
             dist/*.zip
@@ -53,7 +211,7 @@ jobs:
             dist/source.json
 
       - name: Update Homebrew tap
-        if: github.repository == 'brunoborges/ghx' && !contains(github.ref_name, '-')
+        if: github.repository == 'brunoborges/ghx' && !contains(needs.prepare.outputs.version, '-')
         env:
           TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
         run: |

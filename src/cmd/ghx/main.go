@@ -69,13 +69,21 @@ func main() {
 	// interactive or otherwise unsuitable for the daemon. Execute gh directly so the
 	// user gets a full TTY and no IPC timeout can occur.
 	classifier := allowlist.NewClassifier(cfg.AdditionalCache)
-	if (len(ghArgs) > 1 && ghArgs[0] == "api" && strings.TrimPrefix(ghArgs[1], "/") == "rate_limit") || classifier.Classify(ghArgs).Type == allowlist.Passthrough {
+	classification := classifier.Classify(ghArgs)
+	if (len(ghArgs) > 1 && ghArgs[0] == "api" && strings.TrimPrefix(ghArgs[1], "/") == "rate_limit") || classification.Type == allowlist.Passthrough {
 		execDirect(cfg.GHPath, ghArgs)
 		return
 	}
 
 	// Resolve execution context
 	ctx := execctx.Resolve(cfg.GHPath)
+	if classification.Type == allowlist.Mutation {
+		cmd := exec.Command(cfg.GHPath, ghArgs...)
+		cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
+		ctx.Host, ctx.Repo = classification.Target(ctx.Host, ctx.Repo)
+		req := &protocol.Request{Type: protocol.TypeFlush, Context: ctx, Resource: classification.Resource}
+		os.Exit(runMutation(cmd, req, client.New(cfg.SocketPath).Send))
+	}
 
 	// Connect to daemon, auto-starting if needed
 	cl := client.New(cfg.SocketPath)
@@ -220,17 +228,21 @@ func ensureDaemon(cfg *config.Config, cl *client.Client) (bool, error) {
 	}
 
 	if err := startDaemon(cfg); err != nil {
+		// A concurrent client may have won the instance lock while our child
+		// exited. Give that daemon the same readiness window as before.
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			deadline := time.Now().Add(2 * time.Second)
+			for time.Now().Before(deadline) {
+				if daemonReady(cfg.SocketPath, min(100*time.Millisecond, time.Until(deadline))) == nil {
+					return true, nil
+				}
+				time.Sleep(daemonPollInterval)
+			}
+		}
 		return false, fmt.Errorf("daemon auto-start failed: %v", err)
 	}
-
-	// Wait for daemon to be ready
-	for i := 0; i < 20; i++ {
-		if cl.IsRunning() {
-			return true, nil
-		}
-		time.Sleep(100 * time.Millisecond)
-	}
-	return false, fmt.Errorf("daemon failed to start in time")
+	return true, nil
 }
 
 func handleDaemon(cfg *config.Config, args []string) {
@@ -270,9 +282,11 @@ func handleDaemon(cfg *config.Config, args []string) {
 		printFormattedStats(resp.Stdout)
 
 	case "restart":
-		handleDaemon(cfg, []string{"stop"})
-		time.Sleep(500 * time.Millisecond)
-		handleDaemon(cfg, []string{"start", "-d"})
+		if err := restartDaemon(cfg); err != nil {
+			fmt.Fprintf(os.Stderr, "ghx: restart failed: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Printf("ghx: daemon started (socket: %s, dashboard: http://127.0.0.1:%d/)\n", cfg.SocketPath, cfg.DashboardPort)
 
 	default:
 		fmt.Fprintf(os.Stderr, "ghx: unknown daemon command: %s\n", args[0])

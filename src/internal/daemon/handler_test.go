@@ -1,7 +1,11 @@
 package daemon
 
 import (
+	"bytes"
 	"context"
+	"fmt"
+	"os"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -172,6 +176,110 @@ func TestHandler_CacheKeysIsolateAuthIdentity(t *testing.T) {
 	}
 }
 
+func TestHandlerCacheByteBudget(t *testing.T) {
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tt := range []struct {
+		name     string
+		stdout   string
+		stderr   string
+		exitCode int
+		retained bool
+	}{
+		{name: "exact limit", stdout: "out", stderr: "err", retained: true},
+		{name: "oversized stdout", stdout: "toolong", exitCode: 1},
+		{name: "oversized stderr", stderr: "toolong", exitCode: 2},
+		{name: "combined overflow", stdout: "data", stderr: "err"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := config.DefaultConfig()
+			cfg.MaxCacheBytes = 6
+			s := NewServer(cfg, "test", executable)
+			var calls int
+			s.handler.execute = func(context.Context, string, []string, string, authenv.Environment) *executor.Result {
+				calls++
+				return &executor.Result{
+					Stdout:   []byte(tt.stdout),
+					Stderr:   []byte(tt.stderr),
+					ExitCode: tt.exitCode,
+				}
+			}
+			req := &protocol.Request{
+				Type:    protocol.TypeExec,
+				Args:    []string{"pr", "list"},
+				Context: execctx.ExecContext{Host: "github.com", Repo: "o/r"},
+			}
+			for i := range 2 {
+				resp := s.handler.Handle(req)
+				if string(resp.Stdout) != tt.stdout || string(resp.Stderr) != tt.stderr ||
+					resp.ExitCode != tt.exitCode || resp.Error != "" {
+					t.Fatalf("request %d: stdout = %q, stderr = %q, exit code = %d, error = %q; want %q, %q, %d, no error",
+						i+1, resp.Stdout, resp.Stderr, resp.ExitCode, resp.Error, tt.stdout, tt.stderr, tt.exitCode)
+				}
+				if wantCached := tt.retained && i == 1; resp.Cached != wantCached {
+					t.Fatalf("request %d: cached = %v, want %v", i+1, resp.Cached, wantCached)
+				}
+			}
+			wantCalls, wantSize := 2, 0
+			wantUsage := cache.Usage{MaxBytes: 6, Rejected: 2}
+			if tt.retained {
+				wantCalls, wantSize = 1, 1
+				wantUsage.Bytes = int64(len(tt.stdout) + len(tt.stderr))
+				wantUsage.Rejected = 0
+			}
+			if calls != wantCalls {
+				t.Errorf("executions = %d, want %d", calls, wantCalls)
+			}
+			if s.cache.Size() != wantSize || s.cache.Usage() != wantUsage {
+				t.Fatalf("size = %d, usage = %+v; want size %d, usage %+v",
+					s.cache.Size(), s.cache.Usage(), wantSize, wantUsage)
+			}
+		})
+	}
+}
+
+func TestHandlerProtocolOversizedResponsePreservesCache(t *testing.T) {
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload := make([]byte, 8<<20)
+	cfg := config.DefaultConfig()
+	cfg.MaxCacheBytes = int64(len(payload)) + 2
+	s := NewServer(cfg, "test", executable)
+	s.cache.Set(&cache.Entry{
+		Key: "unrelated", Stdout: []byte("out"),
+		CachedAt: time.Now(), TTL: time.Minute,
+	})
+	var calls int
+	s.handler.execute = func(context.Context, string, []string, string, authenv.Environment) *executor.Result {
+		calls++
+		return &executor.Result{Stdout: payload}
+	}
+	req := &protocol.Request{
+		Type:    protocol.TypeExec,
+		Args:    []string{"pr", "list"},
+		Context: execctx.ExecContext{Host: "github.com", Repo: "o/r"},
+	}
+	for range 2 {
+		resp := s.handler.Handle(req)
+		if !bytes.Equal(resp.Stdout, payload) || len(resp.Stderr) != 0 ||
+			resp.ExitCode != 0 || resp.Error != "" || resp.Cached {
+			t.Fatal("protocol-oversized execution result must be returned unchanged and never cached")
+		}
+		if entry := s.cache.Get("unrelated"); entry == nil || string(entry.Stdout) != "out" {
+			t.Fatal("protocol-oversized response must not evict usable cached responses")
+		}
+	}
+	wantUsage := cache.Usage{Bytes: 3, MaxBytes: cfg.MaxCacheBytes, Rejected: 2}
+	if calls != 2 || s.cache.Size() != 1 || s.cache.Usage() != wantUsage {
+		t.Fatalf("executions = %d, size = %d, usage = %+v; want 2 executions, one entry, usage %+v",
+			calls, s.cache.Size(), s.cache.Usage(), wantUsage)
+	}
+}
+
 func TestHandler_SingleflightIsolatesAuthIdentity(t *testing.T) {
 	h := newTestHandler()
 	started := make(chan string, 2)
@@ -240,4 +348,364 @@ func TestHandler_SingleflightIsolatesAuthIdentity(t *testing.T) {
 func newTestHandler() *Handler {
 	cfg := &config.Config{GHPath: "gh", MaxCacheEntries: 100, TTL: 30 * time.Second}
 	return NewHandler(cfg, cache.New(100), allowlist.NewClassifier(nil), metrics.New())
+}
+
+func TestHandlerNoCacheMutationInvalidates(t *testing.T) {
+	for _, noCache := range []bool{false, true} {
+		t.Run(map[bool]string{false: "normal", true: "no-cache"}[noCache], func(t *testing.T) {
+			h := newTestHandler()
+			value := "before"
+			h.execute = func(_ context.Context, _ string, args []string, _ string, _ authenv.Environment) *executor.Result {
+				if args[1] == "edit" {
+					value = "after"
+				}
+				return &executor.Result{Stdout: []byte(value)}
+			}
+			ctx := execctx.ExecContext{Host: "github.com", Repo: "owner/repo"}
+			read := &protocol.Request{Type: protocol.TypeExec, Args: []string{"pr", "view", "1"}, Context: ctx}
+			h.Handle(read)
+			if !h.Handle(read).Cached {
+				t.Fatal("read did not warm the cache")
+			}
+			h.Handle(&protocol.Request{Type: protocol.TypeExec, Args: []string{"pr", "edit", "1"}, Context: ctx, NoCache: noCache})
+			got := h.Handle(read)
+			if got.Cached || string(got.Stdout) != "after" {
+				t.Fatalf("read after mutation = %+v", got)
+			}
+		})
+	}
+}
+
+func TestHandlerAPIMutationsAreNeverCached(t *testing.T) {
+	h := newTestHandler()
+	calls := 0
+	h.execute = func(_ context.Context, _ string, _ []string, _ string, _ authenv.Environment) *executor.Result {
+		calls++
+		return &executor.Result{}
+	}
+	req := &protocol.Request{Type: protocol.TypeExec, Args: []string{"api", "repos/owner/repo/issues", "-f", "title=hello"}}
+	h.Handle(req)
+	h.Handle(req)
+	if calls != 2 || h.cache.Size() != 0 {
+		t.Fatalf("calls = %d, cache size = %d", calls, h.cache.Size())
+	}
+}
+
+func TestHandlerScopedFlush(t *testing.T) {
+	h := newTestHandler()
+	for _, entry := range []cache.Entry{
+		{Key: "target", Host: "github.com", Repo: "owner/repo", Resource: allowlist.ResourcePR},
+		{Key: "other resource", Host: "github.com", Repo: "owner/repo", Resource: allowlist.ResourceIssue},
+		{Key: "other repo", Host: "github.com", Repo: "owner/other", Resource: allowlist.ResourcePR},
+	} {
+		entry.TTL, entry.CachedAt = time.Minute, time.Now()
+		h.cache.Set(&entry)
+	}
+	h.Handle(&protocol.Request{Type: protocol.TypeFlush, Resource: allowlist.ResourcePR,
+		Context: execctx.ExecContext{Host: "github.com", Repo: "owner/repo"}})
+	if h.cache.Get("target") != nil || h.cache.Size() != 2 {
+		t.Fatalf("scoped flush left keys %v", h.cache.Keys())
+	}
+	h.Handle(&protocol.Request{Type: protocol.TypeFlush})
+	if h.cache.Size() != 0 {
+		t.Fatal("legacy/global flush did not clear cache")
+	}
+}
+
+func TestHandlerInvalidationCrossesAPINamespace(t *testing.T) {
+	ctx := execctx.ExecContext{Host: "github.com", Repo: "owner/repo"}
+	seed := func(h *Handler) {
+		for _, entry := range []cache.Entry{
+			{Key: "run", Host: ctx.Host, Repo: ctx.Repo, Resource: allowlist.ResourceRun},
+			{Key: "api", Host: ctx.Host, Repo: ctx.Repo, Resource: allowlist.ResourceAPI},
+			{Key: "pr", Host: ctx.Host, Repo: ctx.Repo, Resource: allowlist.ResourcePR},
+			{Key: "other repo api", Host: ctx.Host, Repo: "owner/other", Resource: allowlist.ResourceAPI},
+		} {
+			entry.TTL, entry.CachedAt = time.Minute, time.Now()
+			h.cache.Set(&entry)
+		}
+	}
+	tests := []struct {
+		resource allowlist.ResourceType
+		left     []string
+	}{
+		{allowlist.ResourceRun, []string{"pr", "other repo api"}},
+		{allowlist.ResourceAPI, []string{"other repo api"}},
+	}
+	for _, tt := range tests {
+		t.Run(string(tt.resource), func(t *testing.T) {
+			h := newTestHandler()
+			seed(h)
+			h.Handle(&protocol.Request{Type: protocol.TypeFlush, Resource: tt.resource, Context: ctx})
+			for _, k := range tt.left {
+				if h.cache.Get(k) == nil {
+					t.Errorf("%q was invalidated", k)
+				}
+			}
+			if h.cache.Size() != len(tt.left) {
+				t.Errorf("remaining keys = %v, want %v", h.cache.Keys(), tt.left)
+			}
+		})
+	}
+}
+
+func TestHandlerNoCacheRefreshesSharedEntry(t *testing.T) {
+	h := newTestHandler()
+	value, calls := "v1", 0
+	h.execute = func(context.Context, string, []string, string, authenv.Environment) *executor.Result {
+		calls++
+		return &executor.Result{Stdout: []byte(value)}
+	}
+	ctx := execctx.ExecContext{Host: "github.com", Repo: "owner/repo"}
+	read := func(noCache bool) *protocol.Response {
+		return h.Handle(&protocol.Request{Type: protocol.TypeExec, Args: []string{"run", "view", "7"}, Context: ctx, NoCache: noCache})
+	}
+	read(false)
+	value = "v2"
+	if got := read(true); got.Cached || string(got.Stdout) != "v2" {
+		t.Fatalf("no-cache read = %+v, want fresh v2", got)
+	}
+	if got := read(false); !got.Cached || string(got.Stdout) != "v2" {
+		t.Fatalf("follow-up read = %+v, want cached v2", got)
+	}
+	if calls != 2 {
+		t.Fatalf("executions = %d, want 2", calls)
+	}
+}
+
+func TestHandlerNoCachePassthroughIsNotStored(t *testing.T) {
+	h := newTestHandler()
+	h.execute = func(context.Context, string, []string, string, authenv.Environment) *executor.Result {
+		return &executor.Result{Stdout: []byte("x")}
+	}
+	h.Handle(&protocol.Request{Type: protocol.TypeExec, Args: []string{"run", "watch", "7"}, NoCache: true})
+	if h.cache.Size() != 0 {
+		t.Fatalf("passthrough stored: %v", h.cache.Keys())
+	}
+}
+
+func TestHandlerKeyScopeSharesAcrossCheckouts(t *testing.T) {
+	tests := []struct {
+		name   string
+		args   []string
+		a, b   execctx.ExecContext
+		shared bool
+	}{
+		{"run view across branches", []string{"run", "view", "7"},
+			execctx.ExecContext{Host: "github.com", Repo: "o/r", Branch: "main"},
+			execctx.ExecContext{Host: "github.com", Repo: "o/r", Branch: "feature"}, true},
+		{"pr view without selector stays per branch", []string{"pr", "view"},
+			execctx.ExecContext{Host: "github.com", Repo: "o/r", Branch: "main"},
+			execctx.ExecContext{Host: "github.com", Repo: "o/r", Branch: "feature"}, false},
+		{"api explicit repo across checkouts", []string{"api", "repos/o/r/actions/runs"},
+			execctx.ExecContext{Host: "github.com", Repo: "a/a", Branch: "x"},
+			execctx.ExecContext{Host: "github.com", Repo: "b/b", Branch: "y"}, true},
+		{"api placeholder stays per repo", []string{"api", "repos/{owner}/{repo}"},
+			execctx.ExecContext{Host: "github.com", Repo: "a/a"},
+			execctx.ExecContext{Host: "github.com", Repo: "b/b"}, false},
+		{"issue view stays per repo", []string{"issue", "view", "1"},
+			execctx.ExecContext{Host: "github.com", Repo: "a/a"},
+			execctx.ExecContext{Host: "github.com", Repo: "b/b"}, false},
+		{"token still isolates", []string{"api", "user"},
+			execctx.ExecContext{Host: "github.com", TokenHash: "one"},
+			execctx.ExecContext{Host: "github.com", TokenHash: "two"}, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h := newTestHandler()
+			h.execute = func(context.Context, string, []string, string, authenv.Environment) *executor.Result {
+				return &executor.Result{Stdout: []byte("ok")}
+			}
+			h.Handle(&protocol.Request{Type: protocol.TypeExec, Args: tt.args, Context: tt.a})
+			got := h.Handle(&protocol.Request{Type: protocol.TypeExec, Args: tt.args, Context: tt.b})
+			if got.Cached != tt.shared {
+				t.Fatalf("cached = %v, want %v", got.Cached, tt.shared)
+			}
+		})
+	}
+}
+
+func TestHandlerExplicitRepoMutationInvalidatesTarget(t *testing.T) {
+	h := newTestHandler()
+	h.execute = func(context.Context, string, []string, string, authenv.Environment) *executor.Result {
+		return &executor.Result{Stdout: []byte("ok")}
+	}
+	cwd := execctx.ExecContext{Host: "github.com", Repo: "cwd/repo"}
+	read := &protocol.Request{Type: protocol.TypeExec, Args: []string{"api", "repos/o/r/pulls/1"}, Context: cwd}
+	h.Handle(read)
+	h.Handle(&protocol.Request{Type: protocol.TypeExec, Args: []string{"pr", "merge", "1", "-R", "o/r"}, Context: cwd})
+	if h.Handle(read).Cached {
+		t.Fatal("api read of o/r survived a pr merge targeting o/r")
+	}
+}
+
+func TestHandlerLifetimeTTLs(t *testing.T) {
+	sha := "0123456789abcdef0123456789abcdef01234567"
+	tests := []struct {
+		name     string
+		args     []string
+		stdout   string
+		exitCode int
+		override bool
+		ttlFlag  int
+		want     time.Duration
+	}{
+		{"sha addressed", []string{"api", "repos/o/r/commits/" + sha}, `{"sha":"x"}`, 0, false, 0, time.Hour},
+		{"sha addressed failure", []string{"api", "repos/o/r/commits/" + sha}, `{}`, 1, false, 0, 30 * time.Second},
+		{"completed run", []string{"run", "view", "9", "--json", "status"}, `{"status":"completed"}`, 0, false, 0, 10 * time.Minute},
+		{"in-progress run", []string{"run", "view", "9", "--json", "status"}, `{"status":"in_progress"}`, 0, false, 0, 30 * time.Second},
+		{"completed job via api", []string{"api", "repos/o/r/actions/jobs/1"}, `{"status":"completed","conclusion":"success"}`, 0, false, 0, 10 * time.Minute},
+		{"config override wins", []string{"run", "view", "9", "--json", "status"}, `{"status":"completed"}`, 0, true, 0, 5 * time.Second},
+		{"request ttl wins", []string{"run", "view", "9", "--json", "status"}, `{"status":"completed"}`, 0, false, 3, 3 * time.Second},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h := newTestHandler()
+			h.cfg.ImmutableTTL, h.cfg.SettledTTL = time.Hour, 10*time.Minute
+			h.cfg.TTLOverrides = map[string]time.Duration{}
+			if tt.override {
+				h.cfg.TTLOverrides["run_view"] = 5 * time.Second
+			}
+			h.execute = func(context.Context, string, []string, string, authenv.Environment) *executor.Result {
+				return &executor.Result{Stdout: []byte(tt.stdout), ExitCode: tt.exitCode}
+			}
+			h.Handle(&protocol.Request{Type: protocol.TypeExec, Args: tt.args, TTLOverride: tt.ttlFlag})
+			keys := h.cache.Keys()
+			if len(keys) != 1 {
+				t.Fatalf("keys = %v", keys)
+			}
+			if got := h.cache.Get(keys[0]).TTL; got != tt.want {
+				t.Fatalf("TTL = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// fakeJSONGH emulates gh --json output for the requested (sorted) fields.
+func fakeJSONGH(calls *[][]string) func(context.Context, string, []string, string, authenv.Environment) *executor.Result {
+	data := map[string]string{"number": "7", "state": `"OPEN"`, "title": `"a<b"`}
+	return func(_ context.Context, _ string, args []string, _ string, _ authenv.Environment) *executor.Result {
+		*calls = append(*calls, append([]string(nil), args...))
+		for _, a := range args {
+			if a == "--jq" {
+				return &executor.Result{Stdout: []byte("raw-gh\n")}
+			}
+		}
+		for i, a := range args {
+			if a == "--json" {
+				var parts []string
+				for _, f := range strings.Split(args[i+1], ",") {
+					parts = append(parts, fmt.Sprintf("%q:%s", f, data[f]))
+				}
+				return &executor.Result{Stdout: []byte("{" + strings.Join(parts, ",") + "}\n")}
+			}
+		}
+		return &executor.Result{Stdout: []byte("text\n")}
+	}
+}
+
+func TestHandlerOutputShaping(t *testing.T) {
+	h := newTestHandler()
+	var calls [][]string
+	h.execute = fakeJSONGH(&calls)
+	ctx := execctx.ExecContext{Host: "github.com", Repo: "o/r"}
+	run := func(args ...string) *protocol.Response {
+		return h.Handle(&protocol.Request{Type: protocol.TypeExec, Args: args, Context: ctx})
+	}
+
+	got := run("pr", "view", "7", "--json", "title,state,number")
+	if got.Cached || string(got.Stdout) != `{"number":7,"state":"OPEN","title":"a<b"}`+"\n" {
+		t.Fatalf("first fetch = %q cached=%v", got.Stdout, got.Cached)
+	}
+	if got := run("pr", "view", "7", "--json", "number,state,title", "--jq", ".title"); !got.Cached || string(got.Stdout) != "a<b\n" {
+		t.Fatalf("jq over cached fields = %q cached=%v", got.Stdout, got.Cached)
+	}
+	if got := run("pr", "view", "7", "--json", "state", "-q", ".state"); !got.Cached || string(got.Stdout) != "OPEN\n" {
+		t.Fatalf("superset projection with jq = %q cached=%v", got.Stdout, got.Cached)
+	}
+	if got := run("pr", "view", "7", "--json", "number,title"); !got.Cached || string(got.Stdout) != `{"number":7,"title":"a<b"}`+"\n" {
+		t.Fatalf("superset projection = %q cached=%v", got.Stdout, got.Cached)
+	}
+	if len(calls) != 1 {
+		t.Fatalf("executions = %v, want 1", calls)
+	}
+
+	// A field outside the cached set needs a new fetch.
+	if got := run("pr", "view", "7", "--json", "url"); got.Cached {
+		t.Fatal("uncovered field served from cache")
+	}
+	// Different selectors never share.
+	if got := run("pr", "view", "8", "--json", "state"); got.Cached {
+		t.Fatal("different PR served from cache")
+	}
+}
+
+func TestHandlerJQFallsBackToGH(t *testing.T) {
+	h := newTestHandler()
+	var calls [][]string
+	h.execute = fakeJSONGH(&calls)
+	ctx := execctx.ExecContext{Host: "github.com", Repo: "o/r"}
+	req := &protocol.Request{Type: protocol.TypeExec, Args: []string{"pr", "view", "7", "--json", "state", "--jq", ".state | keys"}, Context: ctx}
+	got := h.Handle(req)
+	if string(got.Stdout) != "raw-gh\n" {
+		t.Fatalf("jq error should rerun gh with original args, got %q", got.Stdout)
+	}
+	if last := calls[len(calls)-1]; strings.Join(last, " ") != strings.Join(req.Args, " ") {
+		t.Fatalf("fallback args = %q", last)
+	}
+
+	h2 := newTestHandler()
+	var argsSeen [][]string
+	h2.execute = func(_ context.Context, _ string, args []string, _ string, _ authenv.Environment) *executor.Result {
+		argsSeen = append(argsSeen, args)
+		return &executor.Result{Stderr: []byte("not found\n"), ExitCode: 1}
+	}
+	got = h2.Handle(&protocol.Request{Type: protocol.TypeExec, Args: []string{"api", "repos/o/r/pulls/9", "--jq", ".id"}, Context: ctx})
+	if got.ExitCode != 1 || len(argsSeen) != 2 || strings.Join(argsSeen[1], " ") != "api repos/o/r/pulls/9 --jq .id" {
+		t.Fatalf("non-zero exit should rerun original args: resp=%+v calls=%q", got, argsSeen)
+	}
+}
+
+func TestHandlerAPIJQSharesResponse(t *testing.T) {
+	h := newTestHandler()
+	calls := 0
+	h.execute = func(_ context.Context, _ string, args []string, _ string, _ authenv.Environment) *executor.Result {
+		calls++
+		return &executor.Result{Stdout: []byte(`{"id":5,"name":"x","tags":["a"]}`)}
+	}
+	ctx := execctx.ExecContext{Host: "github.com", Repo: "o/r"}
+	for _, tc := range []struct{ jq, want string }{{".id", "5\n"}, {".name", "x\n"}, {".tags", `["a"]` + "\n"}} {
+		got := h.Handle(&protocol.Request{Type: protocol.TypeExec, Args: []string{"api", "repos/o/r", "--jq", tc.jq}, Context: ctx, NoCache: tc.jq == ".id"})
+		if string(got.Stdout) != tc.want {
+			t.Fatalf("jq %s = %q, want %q", tc.jq, got.Stdout, tc.want)
+		}
+	}
+	if calls != 1 {
+		t.Fatalf("executions = %d, want 1", calls)
+	}
+}
+
+func TestHandlerLogsRedactedArgsWhenEnabled(t *testing.T) {
+	h := newTestHandler()
+	h.cfg.LogArgs = true
+	h.execute = func(context.Context, string, []string, string, authenv.Environment) *executor.Result {
+		return &executor.Result{Stdout: []byte(`{"a":1}`)}
+	}
+	ctx := execctx.ExecContext{Host: "github.com", Repo: "o/r"}
+	h.Handle(&protocol.Request{Type: protocol.TypeExec, Args: []string{"api", "repos/o/r", "-H", "Authorization: token x", "--jq", ".a"}, Context: ctx, NoCache: true})
+	h.Handle(&protocol.Request{Type: protocol.TypeExec, Args: []string{"run", "view", "7"}, Context: ctx})
+
+	log := h.stats.Log(0)
+	if len(log) != 2 {
+		t.Fatalf("log = %+v", log)
+	}
+	if got := strings.Join(log[0].Args, " "); got != "--no-cache api repos/o/r -H Authorization: [REDACTED] --jq .a" {
+		t.Errorf("args = %q", got)
+	}
+	if got := strings.Join(log[0].Fetch, " "); got != "api repos/o/r -H Authorization: [REDACTED]" {
+		t.Errorf("fetch = %q", got)
+	}
+	if log[1].Fetch != nil {
+		t.Errorf("fetch should be omitted when unchanged: %q", log[1].Fetch)
+	}
 }

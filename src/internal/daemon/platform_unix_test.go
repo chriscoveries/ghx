@@ -15,6 +15,9 @@ import (
 	"strconv"
 	"sync"
 	"syscall"
+	"strings"
+	"sync"
+
 	"testing"
 	"time"
 
@@ -41,6 +44,69 @@ func TestInstanceLockProcess(t *testing.T) {
 
 func TestInstanceLockAcrossProcesses(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "ghxd.sock")
+func socketTempDir(t *testing.T) string {
+	t.Helper()
+	// t.TempDir includes the test name, which can exceed Unix socket path limits.
+	dir, err := os.MkdirTemp("", "ghxd-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := os.RemoveAll(dir); err != nil {
+			t.Errorf("remove socket directory: %v", err)
+		}
+	})
+	return dir
+}
+
+func waitForServerReady(t *testing.T, path string, finished <-chan error) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		conn, err := net.DialTimeout("unix", path, 50*time.Millisecond)
+		if err == nil {
+			defer conn.Close()
+			conn.SetDeadline(deadline)
+			if err := protocol.WriteMessage(conn, &protocol.Request{Type: protocol.TypeStats}); err != nil {
+				t.Fatal(err)
+			}
+			var response protocol.Response
+			if err := protocol.ReadMessage(conn, &response); err != nil {
+				t.Fatal(err)
+			}
+			if response.Error != "" || response.ExitCode != 0 {
+				t.Fatalf("readiness response: %+v", response)
+			}
+			return
+		}
+		select {
+		case err := <-finished:
+			t.Fatalf("startup: %v", err)
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+	t.Fatal("daemon did not become ready")
+}
+
+// Run the real kernel lock in a separate process; no in-memory substitute.
+func TestInstanceLockProcess(t *testing.T) {
+	path := os.Getenv("GHX_TEST_LOCK_PATH")
+	if path == "" {
+		return
+	}
+	lock, err := acquireInstanceLock(path)
+	if err != nil {
+		os.Exit(3)
+	}
+	fmt.Println("locked")
+	io.Copy(io.Discard, os.Stdin)
+	lock.Close()
+	os.Exit(0)
+}
+
+func TestInstanceLockAcrossProcesses(t *testing.T) {
+	path := filepath.Join(socketTempDir(t), "ghxd.sock")
+
 	cmd := exec.Command(os.Args[0], "-test.run=^TestInstanceLockProcess$")
 	cmd.Env = append(os.Environ(), "GHX_TEST_LOCK_PATH="+path)
 	stdin, err := cmd.StdinPipe()
@@ -95,6 +161,8 @@ func TestInstanceLockAcrossProcesses(t *testing.T) {
 
 func TestStaleSocketCleanup(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "ghxd.sock")
+	path := filepath.Join(socketTempDir(t), "ghxd.sock")
+
 	if err := removeStaleSocket(path); err != nil {
 		t.Fatal(err)
 	}
@@ -132,6 +200,19 @@ func TestServerOwnershipAndConcurrentShutdown(t *testing.T) {
 	defer func() { other.Process.Kill(); other.Wait() }()
 	cfg := config.DefaultConfig()
 	dir := t.TempDir()
+	otherExited := make(chan struct{})
+	var otherErr error
+	go func() {
+		otherErr = other.Wait()
+		close(otherExited)
+	}()
+	defer func() {
+		other.Process.Kill()
+		<-otherExited
+	}()
+	cfg := config.DefaultConfig()
+	dir := socketTempDir(t)
+
 	cfg.SocketPath = filepath.Join(dir, "ghxd.sock")
 	cfg.PIDFile = filepath.Join(dir, "ghxd.pid")
 	cfg.DashboardPort = 0
@@ -171,6 +252,12 @@ func TestServerOwnershipAndConcurrentShutdown(t *testing.T) {
 	conn.Close()
 	if err := other.Process.Signal(syscall.Signal(0)); err != nil {
 		t.Fatalf("startup signalled unrelated PID: %v", err)
+	waitForServerReady(t, cfg.SocketPath, finished)
+	select {
+	case <-otherExited:
+		t.Fatalf("startup signalled unrelated PID: %v", otherErr)
+	case <-time.After(100 * time.Millisecond):
+
 	}
 	secondCfg := *cfg
 	secondCfg.PIDFile = filepath.Join(dir, "other.pid")
@@ -205,6 +292,8 @@ func TestServerOwnershipAndConcurrentShutdown(t *testing.T) {
 func TestStartupFailureReleasesSocketAndLock(t *testing.T) {
 	cfg := config.DefaultConfig()
 	dir := t.TempDir()
+	dir := socketTempDir(t)
+
 	cfg.SocketPath = filepath.Join(dir, "ghxd.sock")
 	cfg.PIDFile = filepath.Join(dir, "not-directory", "ghxd.pid")
 	cfg.DashboardPort = 0
@@ -213,6 +302,9 @@ func TestStartupFailureReleasesSocketAndLock(t *testing.T) {
 	}
 	if err := NewServer(cfg, "test", os.Args[0]).Run(); err == nil {
 		t.Fatal("expected PID write failure")
+	if err := NewServer(cfg, "test", os.Args[0]).Run(); err == nil || !strings.Contains(err.Error(), "write pid:") {
+		t.Fatalf("expected PID write failure, got: %v", err)
+
 	}
 	if _, err := os.Stat(cfg.SocketPath); !os.IsNotExist(err) {
 		t.Fatal("failed startup retained socket")
@@ -249,6 +341,8 @@ func TestOwnershipRetainedUntilHTTPDrain(t *testing.T) {
 	}
 	cfg := config.DefaultConfig()
 	dir := t.TempDir()
+	dir := socketTempDir(t)
+
 	cfg.SocketPath = filepath.Join(dir, "ghxd.sock")
 	cfg.PIDFile = filepath.Join(dir, "ghxd.pid")
 	cfg.DashboardPort = 0
@@ -271,6 +365,9 @@ func TestOwnershipRetainedUntilHTTPDrain(t *testing.T) {
 		t.Fatal("daemon did not become ready")
 	}
 	defer s.Shutdown()
+	defer func() { unblock(); s.Shutdown() }()
+	waitForServerReady(t, cfg.SocketPath, finished)
+
 	go s.Shutdown()
 	<-s.done
 	select {
