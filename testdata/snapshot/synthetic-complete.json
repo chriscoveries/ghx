@@ -1,0 +1,56 @@
+{
+  "data": {
+    "repository": {
+      "nameWithOwner": "example/ghx-test",
+      "defaultBranchRef": {
+        "name": "main",
+        "target": {"oid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}
+      },
+      "pullRequests": {
+        "pageInfo": {"hasNextPage": false, "endCursor": null},
+        "nodes": [
+          {
+            "number": 8,
+            "state": "OPEN",
+            "title": "Synthetic test PR",
+            "isDraft": false,
+            "mergeStateStatus": "CLEAN",
+            "headRefOid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "files": {
+              "pageInfo": {"hasNextPage": false},
+              "totalCount": 1,
+              "nodes": [{"path": "README.md", "additions": 1, "deletions": 0}]
+            },
+            "reviews": {
+              "pageInfo": {"hasPreviousPage": false},
+              "totalCount": 0,
+              "nodes": []
+            },
+            "commits": {
+              "nodes": [{"commit": {
+                "oid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "statusCheckRollup": {
+                  "state": "SUCCESS",
+                  "contexts": {
+                    "pageInfo": {"hasNextPage": false},
+                    "nodes": [
+                      {
+                        "__typename": "CheckRun",
+                        "databaseId": 42,
+                        "name": "test",
+                        "status": "COMPLETED",
+                        "conclusion": "SUCCESS",
+                        "checkSuite": {"app": {"slug": "github-actions", "databaseId": 1}, "workflowRun": {"event": "pull_request", "databaseId": 123}}
+                      },
+                      {"__typename": "StatusContext", "context": "ci/legacy", "state": "SUCCESS"}
+                    ]
+                  }
+                }
+              }}]
+            }
+          }
+        ]
+      }
+    }
+  }
+}
