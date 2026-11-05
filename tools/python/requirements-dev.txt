@@ -1,0 +1,4 @@
+# Optional test tools only; never installed into ghx or ghxd runtime.
+# Match Devkit/Cifast's reviewed Pydantic pin.
+pydantic==2.14.0
+hypothesis==6.168.0
