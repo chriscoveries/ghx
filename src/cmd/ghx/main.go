@@ -124,10 +124,16 @@ func main() {
 
 	logCall(ghArgs, resp.Cached, resp.ExitCode)
 	if len(resp.Stdout) > 0 {
-		os.Stdout.Write(resp.Stdout)
+		if _, err := os.Stdout.Write(resp.Stdout); err != nil {
+			fmt.Fprintf(os.Stderr, "ghx: writing stdout: %v\n", err)
+			os.Exit(1)
+		}
 	}
 	if len(resp.Stderr) > 0 {
-		os.Stderr.Write(resp.Stderr)
+		if _, err := os.Stderr.Write(resp.Stderr); err != nil {
+			fmt.Fprintf(os.Stderr, "ghx: writing stderr: %v\n", err)
+			os.Exit(1)
+		}
 	}
 	os.Exit(resp.ExitCode)
 }
@@ -262,7 +268,10 @@ func handleDaemon(cfg *config.Config, args []string) {
 			fmt.Fprintf(os.Stderr, "ghx: stop failed: %v\n", err)
 			os.Exit(1)
 		}
-		os.Stdout.Write(resp.Stdout)
+		if _, err := os.Stdout.Write(resp.Stdout); err != nil {
+			fmt.Fprintf(os.Stderr, "ghx: writing stdout: %v\n", err)
+			os.Exit(1)
+		}
 
 	case "status":
 		cl := client.New(cfg.SocketPath)
@@ -345,7 +354,10 @@ func handleCache(cfg *config.Config, args []string) {
 			fmt.Fprintf(os.Stderr, "ghx: %v\n", err)
 			os.Exit(1)
 		}
-		os.Stdout.Write(resp.Stdout)
+		if _, err := os.Stdout.Write(resp.Stdout); err != nil {
+			fmt.Fprintf(os.Stderr, "ghx: writing stdout: %v\n", err)
+			os.Exit(1)
+		}
 
 	case "keys":
 		resp, err := cl.Send(&protocol.Request{Type: protocol.TypeKeys})
@@ -354,7 +366,10 @@ func handleCache(cfg *config.Config, args []string) {
 			os.Exit(1)
 		}
 		var keys []string
-		json.Unmarshal(resp.Stdout, &keys)
+		if err := json.Unmarshal(resp.Stdout, &keys); err != nil {
+			fmt.Fprintf(os.Stderr, "ghx: parsing cache keys: %v\n", err)
+			os.Exit(1)
+		}
 		for _, k := range keys {
 			fmt.Println(k)
 		}
@@ -367,23 +382,28 @@ func handleCache(cfg *config.Config, args []string) {
 
 func printFormattedStats(data []byte) {
 	var stats struct {
-		Uptime        string                     `json:"uptime"`
-		Total         int64                      `json:"total"`
-		Hits          int64                      `json:"hits"`
-		Misses        int64                      `json:"misses"`
-		Passthrough   int64                      `json:"passthrough"`
-		Coalesced     int64                      `json:"coalesced"`
-		Revalidated   int64                      `json:"revalidated"`
-		HitRate       float64                    `json:"hit_rate"`
-		CacheSize     int                        `json:"cache_size"`
-		CacheBytes    int64                      `json:"cache_bytes"`
-		MaxCacheBytes int64                      `json:"max_cache_bytes"`
-		CacheRejected int64                      `json:"cache_rejected"`
-		MaxCacheSize  int                        `json:"max_cache_size"`
-		Commands      map[string]json.RawMessage `json:"commands"`
+		Uptime         string                                                   `json:"uptime"`
+		Total          int64                                                    `json:"total"`
+		Hits           int64                                                    `json:"hits"`
+		Misses         int64                                                    `json:"misses"`
+		Passthrough    int64                                                    `json:"passthrough"`
+		Coalesced      int64                                                    `json:"coalesced"`
+		Revalidated    int64                                                    `json:"revalidated"`
+		HitRate        float64                                                  `json:"hit_rate"`
+		CacheSize      int                                                      `json:"cache_size"`
+		CacheBytes     int64                                                    `json:"cache_bytes"`
+		MaxCacheBytes  int64                                                    `json:"max_cache_bytes"`
+		CacheRejected  int64                                                    `json:"cache_rejected"`
+		MaxCacheSize   int                                                      `json:"max_cache_size"`
+		Commands       map[string]json.RawMessage                               `json:"commands"`
+		MissReasons    *struct{ Bypass, Expired, Absent, Unspecified int64 }    `json:"miss_reasons"`
+		RemovalReasons *struct{ Expired, Capacity, Invalidated, Flushed int64 } `json:"removal_reasons"`
 	}
 	if err := json.Unmarshal(data, &stats); err != nil {
-		os.Stdout.Write(data)
+		if _, writeErr := os.Stdout.Write(data); writeErr != nil {
+			fmt.Fprintf(os.Stderr, "ghx: writing stats: %v\n", writeErr)
+			os.Exit(1)
+		}
 		return
 	}
 
@@ -397,6 +417,12 @@ func printFormattedStats(data []byte) {
 	fmt.Printf("Cache Size:      %d / %d entries\n", stats.CacheSize, stats.MaxCacheSize)
 	fmt.Printf("Cache Bytes:     %d / %d bytes\n", stats.CacheBytes, stats.MaxCacheBytes)
 	fmt.Printf("Cache Rejected:  %d\n", stats.CacheRejected)
+	if stats.MissReasons != nil {
+		fmt.Printf("Miss Reasons:    bypass=%d expired=%d absent=%d unspecified=%d\n", stats.MissReasons.Bypass, stats.MissReasons.Expired, stats.MissReasons.Absent, stats.MissReasons.Unspecified)
+	}
+	if stats.RemovalReasons != nil {
+		fmt.Printf("Entry Removals:  expired=%d capacity=%d invalidated=%d flushed=%d\n", stats.RemovalReasons.Expired, stats.RemovalReasons.Capacity, stats.RemovalReasons.Invalidated, stats.RemovalReasons.Flushed)
+	}
 
 	if len(stats.Commands) > 0 {
 		fmt.Println("\nTop Commands:")
@@ -405,7 +431,10 @@ func printFormattedStats(data []byte) {
 				Hits   int64 `json:"hits"`
 				Misses int64 `json:"misses"`
 			}
-			json.Unmarshal(raw, &cmd)
+			if err := json.Unmarshal(raw, &cmd); err != nil {
+				fmt.Fprintf(os.Stderr, "ghx: parsing stats for %s: %v\n", name, err)
+				continue
+			}
 			total := cmd.Hits + cmd.Misses
 			rate := 0.0
 			if total > 0 {

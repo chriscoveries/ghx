@@ -21,14 +21,19 @@ import (
 func (h *Handler) handleConditional(req *protocol.Request) *protocol.Response {
 	start := time.Now()
 	key := execctx.CacheKey(req.Context, req.Args)
-	if e := h.cache.Peek(key); e != nil && !e.IsExpired() {
+	entry := h.cache.Peek(key)
+	if entry != nil && !entry.IsExpired() {
 		h.stats.Record("api_get", key, metrics.ResultHit, time.Since(start).Seconds()*1000)
-		return &protocol.Response{Stdout: e.Stdout, Stderr: e.Stderr, ExitCode: e.ExitCode, Cached: true}
+		return &protocol.Response{Stdout: entry.Stdout, Stderr: entry.Stderr, ExitCode: entry.ExitCode, Cached: true}
 	}
-	return h.refreshConditional(req, key, start)
+	missReason := "absent"
+	if entry != nil {
+		missReason = "expired"
+	}
+	return h.refreshConditional(req, key, start, missReason)
 }
 
-func (h *Handler) refreshConditional(req *protocol.Request, key string, start time.Time) *protocol.Response {
+func (h *Handler) refreshConditional(req *protocol.Request, key string, start time.Time, missReason string) *protocol.Response {
 	version := h.cache.Version()
 	reused := false
 	result, coalesced := h.doSingleflightExec(fmt.Sprintf("%s/%d", key, version), func() *executor.Result {
@@ -94,6 +99,6 @@ func (h *Handler) refreshConditional(req *protocol.Request, key string, start ti
 	} else if reused {
 		status = metrics.ResultRevalidated
 	}
-	h.stats.Record("api_get", key, status, time.Since(start).Seconds()*1000)
+	h.stats.Record("api_get", key, status, time.Since(start).Seconds()*1000, missReason)
 	return &protocol.Response{Stdout: result.Stdout, Stderr: result.Stderr, ExitCode: result.ExitCode, Cached: result.ExitCode == 0 && (reused || coalesced)}
 }

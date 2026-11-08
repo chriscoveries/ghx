@@ -21,6 +21,10 @@ func (h *Handler) handleResource(req *protocol.Request, s *resource.Shape, class
 	start := time.Now()
 	key := execctx.CacheKey(s.Context, s.Args)
 	entry := h.cache.Peek(key)
+	missReason := "absent"
+	if entry != nil && entry.IsExpired() {
+		missReason = "expired"
+	}
 	longTTL := h.cfg.ImmutableTTL
 	// An explicit override controls freshness even for immutable projections.
 	immutable := entry != nil && req.TTLOverride == 0 && time.Since(entry.CachedAt) < longTTL && s.Immutable(entry.Stdout)
@@ -50,7 +54,7 @@ func (h *Handler) handleResource(req *protocol.Request, s *resource.Shape, class
 	}
 	if result.ExitCode != 0 || !s.Valid(result.Stdout) {
 		if result.ExitCode != 0 && upstreamUnavailable(result.Stderr) {
-			h.stats.Record(classification.CmdKey, key, status, time.Since(start).Seconds()*1000)
+			h.stats.Record(classification.CmdKey, key, status, time.Since(start).Seconds()*1000, missReason)
 			return &protocol.Response{Stdout: result.Stdout, Stderr: result.Stderr, ExitCode: result.ExitCode}
 		}
 		// Unsupported CLI fields/permissions retain native execution. This diagnostic
@@ -62,7 +66,7 @@ func (h *Handler) handleResource(req *protocol.Request, s *resource.Shape, class
 		log.Printf("ghx: resource projection fallback command=%s", classification.CmdKey)
 		return nil
 	}
-	h.stats.Record(classification.CmdKey, key, status, time.Since(start).Seconds()*1000)
+	h.stats.Record(classification.CmdKey, key, status, time.Since(start).Seconds()*1000, missReason)
 	return h.renderResource(req, s, result.Stdout, result.Stderr, coalesced)
 }
 

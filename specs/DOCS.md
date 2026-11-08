@@ -9,6 +9,7 @@
   - [Homebrew (macOS)](#homebrew-macos--recommended)
   - [Quick install script (macOS / Linux)](#quick-install-script-macos--linux)
   - [PowerShell (Windows)](#powershell-windows)
+    - [Microsoft Defender blocks `ghx.exe`](#microsoft-defender-blocks-ghxexe)
   - [Manual download](#manual-download)
   - [Build from source](#build-from-source)
   - [Agents Plugin](#agents-plugin-claude-code--copilot-cli)
@@ -62,6 +63,24 @@ irm https://raw.githubusercontent.com/brunoborges/ghx/main/install.ps1 | iex
 ```
 
 This installs `ghx.exe` and `ghxd.exe` to `%LOCALAPPDATA%\ghx\bin` and adds it to your user PATH. If no real `gh.exe` is found, a `gh.cmd` shim is also installed.
+
+#### Microsoft Defender blocks `ghx.exe`
+
+The Windows release binaries are not Authenticode-signed yet. On machines that enforce the Defender attack surface reduction (ASR) rule **Use advanced protection against ransomware** (`c1db55ab-c21a-4637-bb3f-a12568109d35`), an unsigned executable without established reputation can be blocked at launch, so even `ghx.exe xversion` fails with `Access is denied`. Releases after v1.7.1 embed version information in the Windows executables and keep their symbol tables to reduce heuristic false positives, but reputation is assigned by Microsoft and may still be missing for a new release.
+
+To resolve it without turning off Defender protections:
+
+1. **Verify the download.** Compare the archive hash with the release's `checksums.txt`:
+   ```powershell
+   Get-FileHash ghx-windows-amd64.zip -Algorithm SHA256
+   ```
+2. **Confirm the ASR rule caused the block.** Look for Event ID 1121 that names `ghx.exe` and rule `c1db55ab-c21a-4637-bb3f-a12568109d35`:
+   ```powershell
+   Get-WinEvent -LogName 'Microsoft-Windows-Windows Defender/Operational' -FilterXPath '*[System[EventID=1121]]' -MaxEvents 10 |
+     Format-List TimeCreated, Message
+   ```
+3. **Report the false positive.** Submit the blocked `ghx.exe` (and `ghxd.exe`) at the [Microsoft Security Intelligence file submission portal](https://www.microsoft.com/wdsi/filesubmission), and [open an issue](https://github.com/brunoborges/ghx/issues) with the release version and file hash so the maintainers can follow up.
+4. **Ask your administrator for a scoped exclusion if you need ghx right away.** In managed environments, an administrator can add an [ASR rule exclusion](https://learn.microsoft.com/defender-endpoint/attack-surface-reduction-rules-configure) for the exact install path (for example `C:\Users\<user>\AppData\Local\ghx\bin\ghx.exe` and `ghxd.exe`). This exempts only those files from ASR rules; real-time protection and other Defender scans still apply. Don't disable the rule or Defender itself.
 
 ### Manual download
 
@@ -646,3 +665,28 @@ fails with a diagnostic before changing the socket or PID file. The persistent
 `.sock.lock` file must remain in place; it does not indicate a live daemon on its
 own. Stale PID files never authorize signalling a process. Startup also refuses
 an already-listening socket, including daemons from older releases.
+
+
+### Aggregate cache diagnostics
+
+The daemon's `/api/stats` response, `ghx xcache stats`, and dashboard expose:
+
+- `miss_reasons.bypass`: explicit `--no-cache` or `GHX_NO_CACHE=1` requests.
+- `miss_reasons.expired`: the direct lookup found an expired entry.
+- `miss_reasons.absent`: the direct lookup found no retained entry. This includes
+  first use, earlier invalidation/eviction/flush, or an unretained result; it is
+  not proof of a cold request. No extra history of removed keys is retained.
+- `miss_reasons.unspecified`: misses recorded without a recognized reason.
+- `removal_reasons`: entry counts split into expiration, capacity eviction,
+  mutation/scoped invalidation, and full flush. These count entries, not requests.
+
+Miss reasons sum to misses. Coalesced requests remain hits and do not add another
+miss reason. Expiration is observed lazily during lookup. Removal counters and
+request counters have different denominators and must not be added together.
+The existing `evictions` counter retains its historical meaning, including
+expiration and invalidation removals. Cache replacement is not an eviction.
+
+These aggregate diagnostics work with `log_args: false`; they add no arguments,
+response content, repository names, or unbounded labels. They reset when the
+daemon restarts and are not GitHub REST request or quota counters. Freshness
+bypasses, mutation invalidation, and cache retention limits are unchanged.
