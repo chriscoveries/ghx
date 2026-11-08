@@ -145,11 +145,8 @@ func buildRelease(root, version, out string, selected []string) error {
 		}
 		files := []string{"ghx" + suffix, "ghxd" + suffix, "LICENSE", "source.json"}
 		for _, binary := range []string{"ghx", "ghxd"} {
-			cmd := exec.Command("go", "build", "-trimpath", "-buildvcs=true", "-ldflags", "-s -w -X main.version="+version, "-o", filepath.Join(dir, binary+suffix), "./src/cmd/"+binary)
-			cmd.Dir = root
-			cmd.Env = append(os.Environ(), "CGO_ENABLED=0", "GOOS="+parts[0], "GOARCH="+parts[1])
-			if output, err := cmd.CombinedOutput(); err != nil {
-				return fmt.Errorf("build %s %s: %w: %s", binary, target, err, output)
+			if err := buildBinary(root, binary, version, parts[0], parts[1], filepath.Join(dir, binary+suffix)); err != nil {
+				return err
 			}
 		}
 		license, err := os.ReadFile(filepath.Join(root, "LICENSE"))
@@ -212,6 +209,46 @@ func buildRelease(root, version, out string, selected []string) error {
 		return fmt.Errorf("source changed during build; rebuild from a clean commit")
 	}
 	complete = true
+	return nil
+}
+
+// buildBinary keeps Windows symbols and adds VERSIONINFO and an application
+// manifest to reduce Defender false positives. A generated .syso lives in the
+// package directory only for the duration of the corresponding build.
+func buildBinary(root, binary, version, goos, goarch, outputPath string) error {
+	ldflags := "-s -w -X main.version=" + version
+	if goos == "windows" {
+		ldflags = "-X main.version=" + version
+		resourceBase := filepath.Join(root, "src", "cmd", binary, "rsrc")
+		resourcePath := resourceBase + "_windows_" + goarch + ".syso"
+		if _, err := os.Lstat(resourcePath); err == nil {
+			return fmt.Errorf("existing Windows resource would be overwritten: %s", resourcePath)
+		} else if !os.IsNotExist(err) {
+			return err
+		}
+		defer os.Remove(resourcePath)
+		cmd := exec.Command("go", "run", "github.com/tc-hib/go-winres@v0.3.3", "simply",
+			"--arch", goarch, "--out", resourceBase, "--manifest", "cli",
+			"--product-name", "ghx",
+			"--file-description", "ghx - GitHub CLI cache proxy ("+binary+")",
+			"--product-version", strings.TrimPrefix(version, "v"),
+			"--file-version", strings.TrimPrefix(version, "v"),
+			"--original-filename", binary+".exe",
+			"--copyright", "Copyright (c) Bruno Borges. MIT License.")
+		cmd.Dir = root
+		if output, err := cmd.CombinedOutput(); err != nil {
+			return fmt.Errorf("generate Windows resources for %s/%s: %w: %s", binary, goarch, err, output)
+		}
+		if _, err := os.Stat(resourcePath); err != nil {
+			return fmt.Errorf("missing generated Windows resource %s: %w", resourcePath, err)
+		}
+	}
+	cmd := exec.Command("go", "build", "-trimpath", "-buildvcs=true", "-ldflags", ldflags, "-o", outputPath, "./src/cmd/"+binary)
+	cmd.Dir = root
+	cmd.Env = append(os.Environ(), "CGO_ENABLED=0", "GOOS="+goos, "GOARCH="+goarch)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("build %s %s/%s: %w: %s", binary, goos, goarch, err, output)
+	}
 	return nil
 }
 

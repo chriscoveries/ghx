@@ -193,7 +193,13 @@ func (h *Handler) handleExec(req *protocol.Request) *protocol.Response {
 	if classification.Type == allowlist.Passthrough || (req.NoCache && classification.Type != allowlist.Mutation) {
 		result := h.execGH(req.Args, req.WorkDir, req.AuthEnv)
 		latency := time.Since(start).Seconds() * 1000
-		h.record(req, nil, cmdKey, "", metrics.ResultPassthrough, latency)
+		if req.NoCache && classification.Type == allowlist.Cacheable {
+			// Explicit refreshes are counted as misses, but never replace a
+			// shared entry that another caller may still be relying on.
+			h.record(req, nil, cmdKey, "", metrics.ResultMiss, latency, "bypass")
+		} else {
+			h.record(req, nil, cmdKey, "", metrics.ResultPassthrough, latency)
+		}
 
 		return &protocol.Response{
 			Stdout:   result.Stdout,
@@ -245,9 +251,9 @@ func (h *Handler) handleExec(req *protocol.Request) *protocol.Response {
 	if plan.Base != nil {
 		baseKey = execctx.CacheKey(kctx, plan.Base)
 	}
-
 	// Check cache, then any entry that fetched a superset of the fields
-	if entry := h.cache.Get(cacheKey); entry != nil {
+	entry, lookupStatus := h.cache.GetWithStatus(cacheKey)
+	if entry != nil {
 		h.record(req, plan.Fetch, cmdKey, cacheKey, metrics.ResultHit, time.Since(start).Seconds()*1000)
 		return h.finish(plan, req, entryResult(entry), true)
 	}
@@ -266,7 +272,7 @@ func (h *Handler) handleExec(req *protocol.Request) *protocol.Response {
 	if coalesced {
 		h.record(req, plan.Fetch, cmdKey, cacheKey, metrics.ResultCoalesced, latency)
 	} else {
-		h.record(req, plan.Fetch, cmdKey, cacheKey, metrics.ResultMiss, latency)
+		h.record(req, plan.Fetch, cmdKey, cacheKey, metrics.ResultMiss, latency, string(lookupStatus))
 	}
 
 	h.store(cacheKey, cmdKey, classification, req, result, version)
@@ -275,9 +281,11 @@ func (h *Handler) handleExec(req *protocol.Request) *protocol.Response {
 	return h.finish(plan, req, result, false)
 }
 
-func (h *Handler) record(req *protocol.Request, fetch []string, cmdKey, cacheKey string, result metrics.RequestResult, latencyMs float64) {
+// record logs a request. Arguments are attached, redacted, only when
+// log_args is enabled; fetch is included when it differs from the args.
+func (h *Handler) record(req *protocol.Request, fetch []string, cmdKey, cacheKey string, result metrics.RequestResult, latencyMs float64, missReason ...string) {
 	if !h.cfg.LogArgs {
-		h.stats.Record(cmdKey, cacheKey, result, latencyMs)
+		h.stats.Record(cmdKey, cacheKey, result, latencyMs, missReason...)
 		return
 	}
 	args := req.Args
@@ -287,7 +295,7 @@ func (h *Handler) record(req *protocol.Request, fetch []string, cmdKey, cacheKey
 	if slices.Equal(fetch, req.Args) {
 		fetch = nil
 	}
-	h.stats.RecordDetailed(cmdKey, cacheKey, result, latencyMs, metrics.RedactArgs(args), metrics.RedactArgs(fetch))
+	h.stats.RecordDetailed(cmdKey, cacheKey, result, latencyMs, metrics.RedactArgs(args), metrics.RedactArgs(fetch), missReason...)
 }
 
 func entryResult(e *cache.Entry) *executor.Result {
@@ -300,7 +308,7 @@ func entryResult(e *cache.Entry) *executor.Result {
 func (h *Handler) finish(plan shape.Plan, req *protocol.Request, result *executor.Result, cached bool) *protocol.Response {
 	if plan.JQ != "" {
 		var out []byte
-		var err error = errNonZeroExit
+		err := errNonZeroExit
 		if result.ExitCode == 0 {
 			out, err = shape.ApplyJQ(result.Stdout, plan.JQ)
 		}

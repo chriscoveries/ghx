@@ -16,3 +16,6 @@ bin/
 # Release archives
 dist/
 .lanes/
+
+# Generated Windows resources (release builds)
+*.syso

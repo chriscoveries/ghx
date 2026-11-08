@@ -45,8 +45,14 @@ func waitForServerReady(t *testing.T, path string, finished <-chan error) {
 	for time.Now().Before(deadline) {
 		conn, err := net.DialTimeout("unix", path, 50*time.Millisecond)
 		if err == nil {
-			defer conn.Close()
-			conn.SetDeadline(deadline)
+			defer func() {
+				if err := conn.Close(); err != nil {
+					t.Error(err)
+				}
+			}()
+			if err := conn.SetDeadline(deadline); err != nil {
+				t.Fatal(err)
+			}
 			if err := protocol.WriteMessage(conn, &protocol.Request{Type: protocol.TypeStats}); err != nil {
 				t.Fatal(err)
 			}
@@ -79,8 +85,14 @@ func TestInstanceLockProcess(t *testing.T) {
 		os.Exit(3)
 	}
 	fmt.Println("locked")
-	io.Copy(io.Discard, os.Stdin)
-	lock.Close()
+	if _, err := io.Copy(io.Discard, os.Stdin); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(4)
+	}
+	if err := lock.Close(); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(5)
+	}
 	os.Exit(0)
 }
 
@@ -99,7 +111,16 @@ func TestInstanceLockAcrossProcesses(t *testing.T) {
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { cmd.Process.Kill(); cmd.Wait() })
+	t.Cleanup(func() {
+		if cmd.ProcessState == nil {
+			if err := cmd.Process.Kill(); err != nil {
+				t.Error(err)
+			}
+			if err := cmd.Wait(); err != nil {
+				t.Error(err)
+			}
+		}
+	})
 	ready := make(chan error, 1)
 	go func() {
 		line, err := bufio.NewReader(stdout).ReadString('\n')
@@ -117,14 +138,18 @@ func TestInstanceLockAcrossProcesses(t *testing.T) {
 		t.Fatal("lock holder did not become ready")
 	}
 	if lock, err := acquireInstanceLock(path); err == nil {
-		lock.Close()
+		if err := lock.Close(); err != nil {
+			t.Error(err)
+		}
 		t.Fatal("second process acquired an owned socket")
 	}
 	// Process death releases the lock without deleting the persistent inode.
 	if err := cmd.Process.Kill(); err != nil {
 		t.Fatal(err)
 	}
-	stdin.Close()
+	if err := stdin.Close(); err != nil {
+		t.Fatal(err)
+	}
 	if err := cmd.Wait(); err == nil {
 		t.Fatal("expected killed holder to exit unsuccessfully")
 	}
@@ -132,7 +157,11 @@ func TestInstanceLockAcrossProcesses(t *testing.T) {
 	if err != nil {
 		t.Fatalf("lock not released on exit: %v", err)
 	}
-	defer lock.Close()
+	defer func() {
+		if err := lock.Close(); err != nil {
+			t.Error(err)
+		}
+	}()
 	if _, err := os.Stat(path + ".lock"); err != nil {
 		t.Fatal(err)
 	}
@@ -149,17 +178,28 @@ func TestStaleSocketCleanup(t *testing.T) {
 	if err := removeStaleSocket(path); err == nil {
 		t.Fatal("removed a regular file")
 	}
-	os.Remove(path)
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
 	ln, err := net.ListenUnix("unix", &net.UnixAddr{Name: path, Net: "unix"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer ln.Close()
+	defer func() {
+		if ln != nil {
+			if err := ln.Close(); err != nil {
+				t.Error(err)
+			}
+		}
+	}()
 	if err := removeStaleSocket(path); err == nil {
 		t.Fatal("removed a live socket")
 	}
 	ln.SetUnlinkOnClose(false)
-	ln.Close()
+	if err := ln.Close(); err != nil {
+		t.Fatal(err)
+	}
+	ln = nil
 	if err := removeStaleSocket(path); err != nil {
 		t.Fatalf("stale socket: %v", err)
 	}
@@ -181,7 +221,9 @@ func TestServerOwnershipAndConcurrentShutdown(t *testing.T) {
 		close(otherExited)
 	}()
 	defer func() {
-		other.Process.Kill()
+		if err := other.Process.Kill(); err != nil {
+			t.Error(err)
+		}
 		<-otherExited
 	}()
 	cfg := config.DefaultConfig()
@@ -232,7 +274,9 @@ func TestServerOwnershipAndConcurrentShutdown(t *testing.T) {
 	if err != nil {
 		t.Fatalf("shutdown retained lock: %v", err)
 	}
-	lock.Close()
+	if err := lock.Close(); err != nil {
+		t.Error(err)
+	}
 }
 
 func TestStartupFailureReleasesSocketAndLock(t *testing.T) {
@@ -254,7 +298,9 @@ func TestStartupFailureReleasesSocketAndLock(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed startup retained lock: %v", err)
 	}
-	lock.Close()
+	if err := lock.Close(); err != nil {
+		t.Error(err)
+	}
 }
 
 func TestOwnershipRetainedUntilHTTPDrain(t *testing.T) {
@@ -270,9 +316,17 @@ func TestOwnershipRetainedUntilHTTPDrain(t *testing.T) {
 	defer func() { unblock(); httpServer.Close() }()
 	go func() {
 		resp, err := http.Get(httpServer.URL)
-		if err == nil {
-			io.Copy(io.Discard, resp.Body)
-			resp.Body.Close()
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		defer func() {
+			if err := resp.Body.Close(); err != nil {
+				t.Error(err)
+			}
+		}()
+		if _, err := io.Copy(io.Discard, resp.Body); err != nil {
+			t.Error(err)
 		}
 	}()
 	select {
@@ -299,7 +353,9 @@ func TestOwnershipRetainedUntilHTTPDrain(t *testing.T) {
 	case <-time.After(100 * time.Millisecond):
 	}
 	if lock, err := acquireInstanceLock(cfg.SocketPath); err == nil {
-		lock.Close()
+		if err := lock.Close(); err != nil {
+			t.Error(err)
+		}
 		t.Fatal("daemon released ownership before HTTP drained")
 	}
 	unblock()

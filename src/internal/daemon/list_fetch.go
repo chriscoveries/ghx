@@ -145,11 +145,16 @@ func (h *Handler) handleConditionalList(req *protocol.Request, s *resource.Shape
 	}
 	start := time.Now()
 	key := execctx.CacheKey(s.Context, s.Args)
-	if entry := h.cache.Peek(key); entry != nil && !entry.IsExpired() {
+	entry := h.cache.Peek(key)
+	if entry != nil && !entry.IsExpired() {
 		if _, err := s.Project(entry.Stdout); err == nil {
 			h.stats.Record(cmdKey, key, metrics.ResultHit, time.Since(start).Seconds()*1000)
 			return h.renderResource(req, s, entry.Stdout, entry.Stderr, true)
 		}
+	}
+	missReason := "absent"
+	if entry != nil && entry.IsExpired() {
+		missReason = "expired"
 	}
 	version := h.cache.Version()
 	old := h.cache.Peek(key)
@@ -194,7 +199,7 @@ func (h *Handler) handleConditionalList(req *protocol.Request, s *resource.Shape
 			refreshed.ETag = old.ETag
 		}
 		if !h.cache.SetVersion(&refreshed, version) {
-			h.stats.Record(cmdKey, key, metrics.ResultMiss, time.Since(start).Seconds()*1000)
+			h.stats.Record(cmdKey, key, metrics.ResultMiss, time.Since(start).Seconds()*1000, missReason)
 			return &protocol.Response{Stderr: []byte("ghx: cached list invalidated during revalidation; retry explicitly\n"), ExitCode: 1}
 		}
 		status = metrics.ResultRevalidated
@@ -215,6 +220,6 @@ func (h *Handler) handleConditionalList(req *protocol.Request, s *resource.Shape
 	if _, err := s.Project(body); err != nil {
 		return nil
 	}
-	h.stats.Record(cmdKey, key, status, time.Since(start).Seconds()*1000)
+	h.stats.Record(cmdKey, key, status, time.Since(start).Seconds()*1000, missReason)
 	return h.renderResource(req, s, body, nil, status != metrics.ResultMiss)
 }
