@@ -22,3 +22,13 @@ remain exactly unchanged. No token or signed URL is stored.
 
 Tests execute only on hosted CI. No Go build/test ran on firestar. Deployment
 is a separate reviewed seat window; no running daemon/state was modified.
+
+The first external GARM gate (cifast run `43373781816`, ghx `34013e95`)
+passed the anonymous-poison controls but exposed a separate old replay request
+constructor with no Authorization. That constructor now reuses the suite's
+existing nonsecret credential stand-in. All original shared-GET, conditional
+304 and restart assertions and captured response bytes remain unchanged.
+Deleting Authorization from that same request after populating the real shared
+cache is an explicit negative control: it must refuse before serving the cache
+or reaching transport. This is not a captured credential or an anonymous
+positive fixture, and no production admission rule is weakened for the replay.
