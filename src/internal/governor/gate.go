@@ -256,8 +256,9 @@ func credentialFingerprint(header http.Header) (string, error) {
 	return fmt.Sprintf("%x", sha256.Sum256([]byte(parts[1]))), nil
 }
 
-func boundRate(previous Rate, credential string) Rate {
-	if previous.CredentialSHA256 != "" && previous.CredentialSHA256 != credential {
+func boundRate(previous Rate, credential string, now int64) Rate {
+	if previous.CredentialSHA256 != credential &&
+		(previous.CredentialSHA256 != "" || !activeRate(previous, now)) {
 		// RoundTrip has already refused any active epoch belonging to another
 		// credential. An expired epoch cannot carry failures into a rotated one.
 		return Rate{CredentialSHA256: credential}
@@ -518,7 +519,7 @@ func (g *Gate) RoundTrip(r *http.Request, c Caller) (result *http.Response) {
 			resp.Body.Close()
 			return failure(403, "observed rate resource credential differs")
 		}
-		rate = boundRate(rate, credential)
+		rate = boundRate(rate, credential, now)
 		if remaining, err := strconv.Atoi(resp.Header.Get("X-RateLimit-Remaining")); err == nil {
 			rate.Remaining = remaining
 		}
