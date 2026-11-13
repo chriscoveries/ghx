@@ -45,10 +45,9 @@ func capturedHTTP(t *testing.T, name string) *http.Response {
 
 func recordedRequest(t *testing.T) *http.Request {
 	t.Helper()
-	r, err := http.NewRequest("GET", "https://api.github.com/repos/chriscoveries/cifast/issues/140", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	// Reuse the suite's nonsecret credential stand-in, not anonymous owner
+	// traffic. The retained 200/304 response bytes remain unchanged.
+	r := req(http.MethodGet, "/repos/chriscoveries/cifast/issues/140")
 	r.Header.Set("User-Agent", "cifast-jit-broker")
 	return r
 }
@@ -104,6 +103,14 @@ func TestRecordedSharedGETAnd304(t *testing.T) {
 	two.Body.Close()
 	if err != nil || !bytes.Equal(body, twoBody) || calls != 1 || two.Header.Get("X-Ghgate-Cache") != "hit" {
 		t.Fatal("cross-lane cache missed", calls, err)
+	}
+	// A populated shared cache must not bypass missing-credential admission.
+	anonymous := recordedRequest(t)
+	anonymous.Header.Del("Authorization")
+	denied := g.RoundTrip(anonymous, owner)
+	denied.Body.Close()
+	if denied.StatusCode != http.StatusForbidden || calls != 1 {
+		t.Fatal("anonymous owner request bypassed admission via shared cache", calls)
 	}
 	// The real cifast authority path requests no-cache, forcing authenticated
 	// conditional revalidation rather than using the local TTL.
