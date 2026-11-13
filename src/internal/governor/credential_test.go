@@ -294,3 +294,25 @@ func TestSameCredentialRetainsItsRecordedFloor(t *testing.T) {
 	}
 	content(t, result)
 }
+
+func TestHealthyWriteCannotRenewLegacyAnonymousEpoch(t *testing.T) {
+	g := setup(t)
+	before := observedPoison(t)
+	g.Now = func() time.Time { return time.Unix(before.Reset-100, 0) }
+	g.State.Rates["owner/core"] = before
+	g.Transport = transport(func(request *http.Request) (*http.Response, error) {
+		wire := capturedResponse(t)
+		// Named reset mutation: a healthy token has a later quota epoch.
+		wire.Header.Set("X-RateLimit-Reset", strconv.FormatInt(before.Reset+3600, 10))
+		return wire, nil
+	})
+	content(t, g.RoundTrip(req("POST", "/repos/o/r/issues/140"), caller))
+	if g.State.Rates["owner/core"] != before {
+		t.Fatal("healthy later epoch renewed old anonymous floor")
+	}
+	g.Now = func() time.Time { return time.Unix(before.Reset, 0) }
+	content(t, g.RoundTrip(req("GET", "/repos/o/r/issues/140"), caller))
+	if g.State.Rates["owner/core"].CredentialSHA256 != ownFingerprint(t) {
+		t.Fatal("original legacy expiry did not bind current credential")
+	}
+}

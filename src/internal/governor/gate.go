@@ -274,19 +274,24 @@ func foreignRate(rate Rate, credential string, now int64) bool {
 	return activeRate(rate, now) && rate.CredentialSHA256 != "" && rate.CredentialSHA256 != credential
 }
 
-func preserveLegacyRate(previous, observed Rate, now int64) Rate {
+func preserveLegacyRate(previous, observed Rate, now int64, newFloor bool) Rate {
 	if previous.CredentialSHA256 != "" || !activeRate(previous, now) {
 		return observed
 	}
 	// Unknown custody cannot be assigned to today's token, including when an
 	// essential request or write was admitted despite the legacy floor. Keep
-	// the stricter observation until the legacy epoch expires.
+	// its original epoch. A healthy response's later reset cannot renew an
+	// unrelated old low counter. Only a new actual floor signal may extend it.
 	observed.CredentialSHA256 = ""
-	if observed.Remaining > previous.Remaining {
-		observed.Remaining = previous.Remaining
-	}
-	if observed.Reset < previous.Reset {
-		observed.Reset = previous.Reset
+	if !newFloor {
+		observed.Remaining, observed.Reset = previous.Remaining, previous.Reset
+	} else {
+		if observed.Remaining > previous.Remaining {
+			observed.Remaining = previous.Remaining
+		}
+		if observed.Reset < previous.Reset {
+			observed.Reset = previous.Reset
+		}
 	}
 	if observed.Blocked < previous.Blocked {
 		observed.Blocked = previous.Blocked
@@ -559,7 +564,10 @@ func (g *Gate) RoundTrip(r *http.Request, c Caller) (result *http.Response) {
 			rate.Blocked = blockedUntil(resp.Header, now, 1)
 		}
 	}
-	g.State.Rates[id] = preserveLegacyRate(g.State.Rates[id], rate, now)
+	reportedRemaining, remainingErr := strconv.Atoi(resp.Header.Get("X-RateLimit-Remaining"))
+	resource := strings.TrimPrefix(id, cls.Identity+"/")
+	newFloor := remainingErr == nil && reportedRemaining >= 0 && reportedRemaining < g.floor(resource)
+	g.State.Rates[id] = preserveLegacyRate(g.State.Rates[id], rate, now, newFloor)
 
 	if resp.StatusCode == 304 && e.At <= 0 && r.Header.Get("If-None-Match") == "" && r.Header.Get("If-Modified-Since") == "" {
 		resp.Body.Close()

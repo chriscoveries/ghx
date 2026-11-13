@@ -22,8 +22,10 @@ identities. A credential rotation can wait for an active epoch to expire.
 
 Legacy rows with an empty digest remain unknown. Their active floor and
 cooldown cannot be relabelled or relaxed by a successful essential request or
-write. Such responses preserve the stricter remaining/reset/blocked/failure
-values, without binding the legacy observation. After expiry, an ordinary
+write. Healthy responses preserve its original remaining/reset, without binding the
+legacy observation. Only an actual new below-floor observation can extend its
+primary epoch; genuine new backoff can extend its cooldown. A healthy token
+with a later reset cannot renew the old anonymous low counter. After expiry, an ordinary
 authenticated response establishes custody. Existing malformed nonempty
 digests refuse startup instead of silently becoming unknown.
 
