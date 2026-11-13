@@ -1,0 +1,10 @@
+{
+  "source_event": "9d22ae260de94b48915e4684982bfd7f",
+  "observed_at": "2026-11-13T03:39:08Z",
+  "owner_core": {
+    "Remaining": 59,
+    "Reset": "2026-11-13T04:16:36Z"
+  },
+  "authenticated_remaining": 4411,
+  "authenticated_limit": 5000
+}

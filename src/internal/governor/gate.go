@@ -2,6 +2,8 @@ package governor
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"github.com/vektah/gqlparser/v2/ast"
@@ -34,6 +36,8 @@ type Rate struct {
 	Remaining      int
 	Reset, Blocked int64
 	Failures       int64
+	// A fixed identity/resource slot, not one persistent entry per rotated token.
+	CredentialSHA256 string `json:",omitempty"`
 }
 type State struct {
 	Rates     map[string]Rate
@@ -85,6 +89,14 @@ func New(dir string) (*Gate, error) {
 	}
 	if g.Policy.StatusTTL <= 0 {
 		g.Policy.StatusTTL = 120
+	}
+	for _, rate := range g.State.Rates {
+		if rate.CredentialSHA256 != "" {
+			decoded, err := hex.DecodeString(rate.CredentialSHA256)
+			if err != nil || len(decoded) != sha256.Size || strings.ToLower(rate.CredentialSHA256) != rate.CredentialSHA256 {
+				return nil, fmt.Errorf("invalid persisted credential fingerprint")
+			}
+		}
 	}
 	return g, nil
 }
@@ -228,6 +240,63 @@ func operation(b []byte) ast.Operation {
 	return ""
 }
 func ReadQuery(b []byte) bool { return operation(b) == ast.Query }
+
+// The identity label alone does not authenticate a request. In owner fallback
+// mode the client supplies its existing credential; configured identities fill
+// theirs above this boundary. Never forward an anonymous owner-class request.
+func credentialFingerprint(header http.Header) (string, error) {
+	values := header.Values("Authorization")
+	if len(values) != 1 || len(values[0]) > 8192 {
+		return "", fmt.Errorf("missing or ambiguous credential")
+	}
+	parts := strings.Fields(values[0])
+	if len(parts) != 2 || (!strings.EqualFold(parts[0], "Bearer") && !strings.EqualFold(parts[0], "token")) {
+		return "", fmt.Errorf("unsupported credential")
+	}
+	return fmt.Sprintf("%x", sha256.Sum256([]byte(parts[1]))), nil
+}
+
+func boundRate(previous Rate, credential string) Rate {
+	if previous.CredentialSHA256 != "" && previous.CredentialSHA256 != credential {
+		// RoundTrip has already refused any active epoch belonging to another
+		// credential. An expired epoch cannot carry failures into a rotated one.
+		return Rate{CredentialSHA256: credential}
+	}
+	previous.CredentialSHA256 = credential
+	return previous
+}
+
+func activeRate(rate Rate, now int64) bool {
+	return rate.Reset > now || rate.Blocked > now
+}
+
+func foreignRate(rate Rate, credential string, now int64) bool {
+	return activeRate(rate, now) && rate.CredentialSHA256 != "" && rate.CredentialSHA256 != credential
+}
+
+func preserveLegacyRate(previous, observed Rate, now int64) Rate {
+	if previous.CredentialSHA256 != "" || !activeRate(previous, now) {
+		return observed
+	}
+	// Unknown custody cannot be assigned to today's token, including when an
+	// essential request or write was admitted despite the legacy floor. Keep
+	// the stricter observation until the legacy epoch expires.
+	observed.CredentialSHA256 = ""
+	if observed.Remaining > previous.Remaining {
+		observed.Remaining = previous.Remaining
+	}
+	if observed.Reset < previous.Reset {
+		observed.Reset = previous.Reset
+	}
+	if observed.Blocked < previous.Blocked {
+		observed.Blocked = previous.Blocked
+	}
+	if observed.Failures < previous.Failures {
+		observed.Failures = previous.Failures
+	}
+	return observed
+}
+
 func (g *Gate) RoundTrip(r *http.Request, c Caller) (result *http.Response) {
 	// One queue is deliberate: primary/secondary budgets are shared; no retries/polling.
 	g.mu.Lock()
@@ -267,6 +336,10 @@ func (g *Gate) RoundTrip(r *http.Request, c Caller) (result *http.Response) {
 	} else if cls.Identity != "owner" {
 		return failure(403, "configured identity unavailable")
 	}
+	credential, err := credentialFingerprint(r.Header)
+	if err != nil {
+		return failure(403, "authenticated identity required")
+	}
 	body := []byte{}
 	if r.Body != nil && r.URL.Path == "/graphql" {
 		var err error
@@ -291,6 +364,14 @@ func (g *Gate) RoundTrip(r *http.Request, c Caller) (result *http.Response) {
 	}
 	id := cls.Identity + "/" + category
 	rate := g.State.Rates[id]
+	// An identity is one credential across resources. Never let another token
+	// overwrite its active floor/cooldown; legacy unbound rows retain their
+	// existing limits until an authenticated response can bind them.
+	for key, previous := range g.State.Rates {
+		if r.URL.Path != "/rate_limit" && strings.HasPrefix(key, cls.Identity+"/") && foreignRate(previous, credential, now) {
+			return failure(403, "identity credential changed during active rate epoch")
+		}
+	}
 	key := readKey(r, body)
 	path := filepath.Join(g.Dir, "rest", key+".json")
 	var e Entry
@@ -412,6 +493,11 @@ func (g *Gate) RoundTrip(r *http.Request, c Caller) (result *http.Response) {
 		}
 		return failure(503, "upstream unavailable")
 	}
+	// An expired/invalid bearer can receive the anonymous rate headers too.
+	// It must never establish or overwrite the credential-bound rate record.
+	if resp.StatusCode == http.StatusUnauthorized || r.URL.Path == "/rate_limit" {
+		return resp
+	}
 	freshUpstream := true
 	// /rate_limit can disagree with real request headers; it never clears a block/floor.
 	// D3: rate introspection is exempt from the cooldown block itself.
@@ -421,6 +507,13 @@ func (g *Gate) RoundTrip(r *http.Request, c Caller) (result *http.Response) {
 			id = cls.Identity + "/" + observed
 			rate = g.State.Rates[id]
 		}
+		// The resource returned by GitHub may differ from the predicted path
+		// category. Check its destination independently before touching fields.
+		if foreignRate(rate, credential, now) {
+			resp.Body.Close()
+			return failure(403, "observed rate resource credential differs")
+		}
+		rate = boundRate(rate, credential)
 		if remaining, err := strconv.Atoi(resp.Header.Get("X-RateLimit-Remaining")); err == nil {
 			rate.Remaining = remaining
 		}
@@ -466,7 +559,7 @@ func (g *Gate) RoundTrip(r *http.Request, c Caller) (result *http.Response) {
 			rate.Blocked = blockedUntil(resp.Header, now, 1)
 		}
 	}
-	g.State.Rates[id] = rate
+	g.State.Rates[id] = preserveLegacyRate(g.State.Rates[id], rate, now)
 
 	if resp.StatusCode == 304 && e.At <= 0 && r.Header.Get("If-None-Match") == "" && r.Header.Get("If-Modified-Since") == "" {
 		resp.Body.Close()
