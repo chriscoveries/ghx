@@ -1,11 +1,32 @@
-# To get started with Dependabot version updates, you'll need to specify which
-# package ecosystems to update and where the package manifests are located.
-# Please see the documentation for all configuration options:
-# https://docs.github.com/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file
-
+# ci-way rollout: Dependabot config (owner order 13 Nov 2026,
+# cifast decisions/20261113-dependabot-plan.md). Same rules as the cifast
+# ci-way v1.1 pilot: weekly, minor+patch grouped into one PR per ecosystem,
+# majors ungrouped for owning-seat LGTM, open-pull-requests-limit 1.
 version: 2
 updates:
-  - package-ecosystem: "gomod" # See documentation for possible values
-    directory: "/" # Location of package manifests
+  - package-ecosystem: "gomod"
+    directory: "/"
     schedule:
       interval: "weekly"
+      day: "friday"
+    open-pull-requests-limit: 1
+    groups:
+      minor-and-patch:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "friday"
+    open-pull-requests-limit: 1
+    groups:
+      minor-and-patch:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
