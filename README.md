@@ -42,22 +42,30 @@ See the [full documentation](specs/DOCS.md#install) for manual download, buildin
 
 ### Usage
 
-Use `ghx` exactly like `gh` — the daemon starts automatically on first use:
+Use `ghx` like `gh` — the daemon starts automatically on first use. For the
+read examples below to use shared caching, authenticate on the selected host,
+let ghx resolve its credential fingerprint, and bind the repository explicitly
+with `GH_REPO`:
 
 ```bash
-ghx pr list --repo owner/repo --json number,title   # cached
-ghx issue view 42 --json title,state                 # cached
+export GH_REPO=owner/repo
+ghx pr list --repo owner/repo --json number,title   # cache eligible
+ghx issue view 42 --json title,state                 # cache eligible
 ghx pr create --title "My PR" --body "Description"   # mutation — passes through
 ```
 
-```
-First call:   ghx pr list ...   → 1.1s (cache miss, calls gh)
-Second call:  ghx pr list ...   → 0.1s (cache hit, instant)
-```
+A cache-eligible read can populate an entry; a later matching read may hit it
+while the entry remains valid.
+
+Unbound repository/host or credential identity passes through without shared
+caching, and mutations flush all in-memory entries. See the cache-key and
+invalidation details in the full documentation.
 
 ## Documentation
 
 📖 **[Full documentation](specs/DOCS.md)** — install options, configuration, daemon & cache management, what gets cached, architecture, and more.
+
+🚀 **[Release process](RELEASE.md)** — how maintainers cut app and plugin releases.
 
 ## License
 

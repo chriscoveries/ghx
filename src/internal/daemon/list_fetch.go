@@ -26,7 +26,9 @@ import (
 // are answered by bytes that have not changed. The CLI does not expose
 // validators, so an expired entry used to mean a full refetch. Reading the same
 // collection through the REST endpoint the CLI uses gives the daemon an ETag to
-// hand back, and a 304 then refreshes the cached bytes without spending quota.
+// hand back, and a 304 can refresh the cached bytes. When the fleet proxy is
+// configured it separately attributes the conditional request; do not infer
+// quota or accounting from the response status alone.
 
 // restRunFields maps the JSON names `gh run list --json` accepts onto the
 // representation the REST endpoint returns. A field outside this table keeps
@@ -144,10 +146,9 @@ func (h *Handler) handleConditionalList(req *protocol.Request, s *resource.Shape
 	start := time.Now()
 	key := execctx.CacheKey(s.Context, s.Args)
 	if entry := h.cache.Peek(key); entry != nil && !entry.IsExpired() {
-		projected, err := s.Project(entry.Stdout)
-		if err == nil {
+		if _, err := s.Project(entry.Stdout); err == nil {
 			h.stats.Record(cmdKey, key, metrics.ResultHit, time.Since(start).Seconds()*1000)
-			return &protocol.Response{Stdout: projected, Stderr: entry.Stderr, ExitCode: entry.ExitCode, Cached: true}
+			return h.renderResource(req, s, entry.Stdout, entry.Stderr, true)
 		}
 	}
 	version := h.cache.Version()
@@ -157,14 +158,21 @@ func (h *Handler) handleConditionalList(req *protocol.Request, s *resource.Shape
 		args = append(args, "--header", "If-None-Match: "+old.ETag)
 	}
 	r := h.execGH(args, req.WorkDir, req.AuthEnv)
-	if r.ExitCode != 0 {
-		return nil
+	// A known upstream outage or rate limit is already a terminal observation.
+	// Do not turn it into an additional superset and native request.
+	if r.ExitCode != 0 && upstreamUnavailable(r.Stderr) {
+		return &protocol.Response{Stderr: r.Stderr, ExitCode: r.ExitCode}
 	}
 	response, err := http.ReadResponse(bufio.NewReader(bytes.NewReader(r.Stdout)), nil)
 	if err != nil {
 		return nil
 	}
 	defer response.Body.Close()
+	// gh reports an HTTP 304 as exit 1 even with --include; the retained
+	// fleet capture demonstrates that this is a valid revalidation response.
+	if r.ExitCode != 0 && !(r.ExitCode == 1 && response.StatusCode == http.StatusNotModified) {
+		return nil
+	}
 	body, err := io.ReadAll(response.Body)
 	if err != nil {
 		return nil
@@ -178,14 +186,17 @@ func (h *Handler) handleConditionalList(req *protocol.Request, s *resource.Shape
 		if old == nil || old.ETag == "" {
 			return nil
 		}
-		// A 304 refreshes the representation the cache already holds: no bytes
-		// change, no quota is spent, and the age restarts.
+		// Refresh only if the generation is still current. The atomic check
+		// closes the race between a separate Version check and this insertion.
 		refreshed := *old
 		refreshed.CachedAt = time.Now()
 		if tag == "" {
 			refreshed.ETag = old.ETag
 		}
-		h.cache.SetVersion(&refreshed, version)
+		if !h.cache.SetVersion(&refreshed, version) {
+			h.stats.Record(cmdKey, key, metrics.ResultMiss, time.Since(start).Seconds()*1000)
+			return &protocol.Response{Stderr: []byte("ghx: cached list invalidated during revalidation; retry explicitly\n"), ExitCode: 1}
+		}
 		status = metrics.ResultRevalidated
 		body = old.Stdout
 	} else if response.StatusCode == http.StatusOK {
@@ -201,10 +212,9 @@ func (h *Handler) handleConditionalList(req *protocol.Request, s *resource.Shape
 	} else {
 		return nil
 	}
-	projected, err := s.Project(body)
-	if err != nil {
+	if _, err := s.Project(body); err != nil {
 		return nil
 	}
 	h.stats.Record(cmdKey, key, status, time.Since(start).Seconds()*1000)
-	return &protocol.Response{Stdout: projected, Cached: status != metrics.ResultMiss}
+	return h.renderResource(req, s, body, nil, status != metrics.ResultMiss)
 }

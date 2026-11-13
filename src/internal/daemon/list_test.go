@@ -41,7 +41,7 @@ func listHandler(t *testing.T) (*Handler, *[]string, *sync.Mutex) {
 }
 
 func listReq(args ...string) *protocol.Request {
-	return &protocol.Request{Args: args, Context: execctx.ExecContext{Host: "github.com", Repo: "chriscoveries/cifast", Branch: "one", TokenHash: "identity"}}
+	return &protocol.Request{Args: args, Context: execctx.ExecContext{RepoBound: true, Host: "github.com", Repo: "chriscoveries/cifast", Branch: "one", TokenHash: "identity"}}
 }
 
 func runListCalls(calls []string) int {

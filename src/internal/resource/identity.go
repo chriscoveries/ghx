@@ -131,6 +131,16 @@ func ParseAPI(args []string) APIShape {
 	a := APIShape{Method: "GET", Conditional: true, Valid: true}
 	explicit, body := false, false
 	for i := 1; i < len(args); i++ {
+		if args[i] == "--" {
+			if a.Endpoint != "" || i+2 != len(args) {
+				a.Valid = false
+			} else {
+				a.Endpoint = args[i+1]
+			}
+			// Added conditional flags would be operands after the terminator.
+			a.Conditional = false
+			break
+		}
 		flag, value, equal := strings.Cut(args[i], "=")
 		if !strings.HasPrefix(flag, "-") {
 			if a.Endpoint != "" {
@@ -140,6 +150,10 @@ func ParseAPI(args []string) APIShape {
 			continue
 		}
 		switch {
+		case strings.HasPrefix(flag, "-iX") && len(flag) > 3:
+			a.Method = strings.ToUpper(flag[3:])
+			explicit = true
+			a.Conditional = false // --include is already present
 		case flag == "--method" || flag == "-X" || strings.HasPrefix(flag, "-X"):
 			if strings.HasPrefix(flag, "-X") && len(flag) > 2 {
 				value = flag[2:]
