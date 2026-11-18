@@ -1,3 +1,5 @@
+# ci-way v1.1 follow-up (seat r252, 18 Nov 2026): rebase-strategy disabled so
+# Dependabot PRs do not re-run CI on every main move.
 # To get started with Dependabot version updates, you'll need to specify which
 # package ecosystems to update and where the package manifests are located.
 # Please see the documentation for all configuration options:
@@ -8,4 +10,5 @@ updates:
   - package-ecosystem: "gomod" # See documentation for possible values
     directory: "/" # Location of package manifests
     schedule:
-      interval: "weekly"
+      interval: "daily"
+    rebase-strategy: "disabled"
