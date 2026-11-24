@@ -34,28 +34,21 @@ func main() {
 		fmt.Fprintln(os.Stderr, "ghx:", err)
 		os.Exit(1)
 	}
-	if len(args) == 0 {
-		mustResolveGH(cfg)
-		execDirect(cfg.GHPath, nil)
-		return
-	}
-
 	// Handle ghx-specific subcommands (x-prefixed to avoid conflicts with gh)
-	if handled := handleSubcommand(cfg, args); handled {
+	if len(args) > 0 && handleSubcommand(cfg, args) {
 		return
 	}
 
 	// Parse ghx flags (before the gh args)
 	ghArgs, noCache, ttlOverride := parseGHXFlags(args)
-
-	if len(ghArgs) == 0 {
-		mustResolveGH(cfg)
-		execDirect(cfg.GHPath, nil)
-		return
-	}
+	call := startCall(ghArgs)
 
 	// Resolve real gh binary (lazy — only on execution path)
-	mustResolveGH(cfg)
+	mustResolveGH(cfg, call)
+	if len(ghArgs) == 0 {
+		execDirect(cfg.GHPath, nil, call)
+		return
+	}
 
 	// Short-circuit: passthrough commands (e.g. auth login, config, codespace) are
 	// interactive or otherwise unsuitable for the daemon. Execute gh directly so the
@@ -68,14 +61,16 @@ func main() {
 		cmd := exec.Command(cfg.GHPath, ghArgs...)
 		cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
 		req := &protocol.Request{Type: protocol.TypeFlush}
-		os.Exit(runMutation(cmd, req, client.New(cfg.SocketPath).Send))
+		code := runMutation(cmd, req, client.New(cfg.SocketPath).Send)
+		call.finish(false, code)
+		os.Exit(code)
 	}
 	if readsStdin(ghArgs, os.Stdin) {
-		execDirect(cfg.GHPath, ghArgs)
+		execDirect(cfg.GHPath, ghArgs, call)
 		return
 	}
 	if (len(ghArgs) > 1 && ghArgs[0] == "api" && strings.TrimPrefix(ghArgs[1], "/") == "rate_limit") || classification.Type == allowlist.Passthrough {
-		execDirect(cfg.GHPath, ghArgs)
+		execDirect(cfg.GHPath, ghArgs, call)
 		return
 	}
 
@@ -89,7 +84,7 @@ func main() {
 		} else {
 			fmt.Fprintf(os.Stderr, "ghx: warning: daemon not running, bypassing cache (start with: ghx xdaemon start)\n")
 		}
-		execDirect(cfg.GHPath, ghArgs)
+		execDirect(cfg.GHPath, ghArgs, call)
 		return
 	}
 
@@ -115,14 +110,15 @@ func main() {
 			// mutating commands). Abort instead and let the user decide.
 			fmt.Fprintf(os.Stderr, "ghx: daemon error: %v\n", err)
 			fmt.Fprintf(os.Stderr, "ghx: not falling back — command may have already been executed by the daemon\n")
+			call.finish(false, 1)
 			os.Exit(1)
 		}
 		fmt.Fprintf(os.Stderr, "ghx: warning: daemon error: %v (bypassing cache)\n", err)
-		execDirect(cfg.GHPath, ghArgs)
+		execDirect(cfg.GHPath, ghArgs, call)
 		return
 	}
 
-	logCall(ghArgs, resp.Cached, resp.ExitCode)
+	call.finish(resp.Cached, resp.ExitCode)
 	if len(resp.Stdout) > 0 {
 		os.Stdout.Write(resp.Stdout)
 	}
@@ -445,10 +441,11 @@ func findGHXD() (string, error) {
 // mustResolveGH resolves the real gh binary path, updating cfg.GHPath.
 // Exits with an error if gh cannot be found or downloaded.
 // Also checks staleness for managed binaries.
-func mustResolveGH(cfg *config.Config) {
+func mustResolveGH(cfg *config.Config, call *callLog) {
 	resolved, err := ghcli.ResolveGHPath(cfg.GHPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "ghx: %v\n", err)
+		call.finish(false, 1)
 		os.Exit(1)
 	}
 	cfg.GHPath = resolved
