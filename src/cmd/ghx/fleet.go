@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
@@ -57,11 +58,27 @@ func prepareFleet(args []string) error {
 	os.Setenv("SSL_CERT_FILE", filepath.Join(dir, "ca.pem"))
 	return nil
 }
-func logCall(args []string, cached bool, code int) {
+
+type callIdentity struct {
+	ID      string    `json:"call_id"`
+	StartAt time.Time `json:"start_at"`
+	Caller  string    `json:"caller"`
+	Command string    `json:"command"`
+	Key     string    `json:"key"`
+}
+
+type callLog struct {
+	path    string
+	started time.Time
+	callIdentity
+}
+
+func startCall(args []string) *callLog {
 	path := os.Getenv("GHX_CALL_LOG")
 	if path == "" {
-		return
+		return nil
 	}
+	started := time.Now()
 	cmd := ""
 	if len(args) > 0 {
 		cmd = args[0]
@@ -71,16 +88,54 @@ func logCall(args []string, cached bool, code int) {
 	}
 	cwd, _ := os.Getwd()
 	key := sha256.Sum256([]byte(cwd + "\x00" + strings.Join(args, "\x00")))
-	data, _ := json.Marshal(map[string]any{"at": time.Now().UTC(), "caller": os.Getenv("GH_CALLER"), "command": cmd, "key": fmt.Sprintf("%x", key), "cached": cached, "exit": code})
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
+	call := &callLog{path: path, started: started, callIdentity: callIdentity{
+		ID:      rand.Text(),
+		StartAt: started.UTC(),
+		Caller:  os.Getenv("GH_CALLER"),
+		Command: cmd,
+		Key:     fmt.Sprintf("%x", key),
+	}}
+	// Keep at and exit on the completion row so existing counters see one call.
+	call.append(struct {
+		callIdentity
+		Event string `json:"event"`
+	}{call.callIdentity, "start"})
+	return call
+}
+
+func (call *callLog) finish(cached bool, code int) {
+	if call == nil {
+		return
+	}
+	finished := time.Now()
+	call.append(struct {
+		callIdentity
+		Event      string    `json:"event"`
+		At         time.Time `json:"at"`
+		Cached     bool      `json:"cached"`
+		Exit       int       `json:"exit"`
+		DurationMS int64     `json:"duration_ms"`
+	}{call.callIdentity, "finish", finished.UTC(), cached, code, finished.Sub(call.started).Milliseconds()})
+}
+
+func (call *callLog) append(record any) {
+	data, err := json.Marshal(record)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "ghx: ledger unavailable")
+		return
+	}
+	f, err := os.OpenFile(call.path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "ghx: ledger unavailable")
 		return
 	}
 	defer f.Close()
-	f.Write(append(data, '\n'))
+	if _, err := f.Write(append(data, '\n')); err != nil {
+		fmt.Fprintln(os.Stderr, "ghx: ledger unavailable")
+	}
 }
-func runLoggedDirect(path string, args []string) {
+
+func (call *callLog) runDirect(path string, args []string) {
 	cmd := exec.Command(path, args...)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
@@ -92,6 +147,6 @@ func runLoggedDirect(path string, args []string) {
 			code = e.ExitCode()
 		}
 	}
-	logCall(args, false, code)
+	call.finish(false, code)
 	os.Exit(code)
 }
