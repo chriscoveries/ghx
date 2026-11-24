@@ -199,6 +199,7 @@ func handleSnapshot(cfg *config.Config, args []string) {
 		fmt.Fprintln(os.Stderr, "ghx snapshot:", err)
 		os.Exit(2)
 	}
+	call := startCall([]string{"snapshot", opts.owner + "/" + opts.name})
 	// The proxy URL is built once, in prepareFleet, from the flags it parsed —
 	// and it does not know --fresh. Setting GHX_NO_CACHE here would be too late:
 	// the caller (and with it Revalidate) is already encoded in HTTPS_PROXY, so
@@ -206,6 +207,7 @@ func handleSnapshot(cfg *config.Config, args []string) {
 	// bypass. Rebuild the proxy environment for this child instead.
 	if err := applySnapshotProxy(opts.fresh); err != nil {
 		fmt.Fprintln(os.Stderr, "ghx snapshot:", err)
+		call.finish(false, 1)
 		os.Exit(1)
 	}
 	cmd := exec.Command(cfg.GHPath, snapshotGHArgs(opts)...)
@@ -228,7 +230,7 @@ func handleSnapshot(cfg *config.Config, args []string) {
 			code = staleExit(header, opts.allowStale)
 		}
 	}
-	logCall([]string{"snapshot", opts.owner + "/" + opts.name}, false, code)
+	call.finish(false, code)
 	os.Exit(code)
 }
 
