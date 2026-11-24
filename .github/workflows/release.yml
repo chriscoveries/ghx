@@ -11,6 +11,8 @@ permissions:
 jobs:
   release:
     runs-on: ubuntu-latest
+    env:
+      FLEET_CLIENT_RELEASE: ${{ github.repository == 'chriscoveries/ghx' && github.ref_name == 'v0.1.0-fleet.5' }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -29,10 +31,25 @@ jobs:
           VERSION=${GITHUB_REF#refs/tags/}
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
           echo "version_num=${VERSION#v}" >> "$GITHUB_OUTPUT"
+          if [ "$FLEET_CLIENT_RELEASE" = true ]; then
+            go run ./scripts/release "$VERSION" dist linux-amd64
+            (cd dist && sha256sum --check checksums.txt)
+            client_dir=$(mktemp -d "$RUNNER_TEMP/ghx-client.XXXXXX")
+            tar -xzf dist/ghx-linux-amd64.tar.gz -C "$client_dir" ghx LICENSE
+            (cd "$client_dir" && sha256sum ghx) > dist/ghx.sha256
+            tar --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner \
+              -C "$client_dir" -czf dist/ghx-linux-amd64-client.tar.gz ghx LICENSE
+            for asset in dist/ghx-linux-amd64-client.tar.gz dist/ghx.sha256 dist/source.json; do
+              test "$(wc -c < "$asset")" -le 5000000
+            done
+            cat dist/ghx.sha256
+            exit 0
+          fi
           go run ./scripts/release "$VERSION" dist
           (cd dist && sha256sum --check checksums.txt)
 
       - name: Read archive checksums
+        if: env.FLEET_CLIENT_RELEASE != 'true'
         id: checksums
         run: |
           for platform in DARWIN_ARM64 DARWIN_AMD64 LINUX_AMD64 LINUX_ARM64; do
@@ -43,6 +60,7 @@ jobs:
           done
 
       - name: Create GitHub Release
+        if: env.FLEET_CLIENT_RELEASE != 'true'
         uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
@@ -50,6 +68,16 @@ jobs:
             dist/*.tar.gz
             dist/*.zip
             dist/checksums.txt
+            dist/source.json
+
+      - name: Publish the fleet Linux client
+        if: env.FLEET_CLIENT_RELEASE == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          fail_on_unmatched_files: true
+          files: |
+            dist/ghx-linux-amd64-client.tar.gz
+            dist/ghx.sha256
             dist/source.json
 
       - name: Update Homebrew tap
