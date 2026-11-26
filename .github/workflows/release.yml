@@ -4,6 +4,7 @@ on:
   push:
     tags:
       - 'v*'
+      - '!v0.1.0-fleet.*'
   workflow_dispatch:
     inputs:
       bump:
