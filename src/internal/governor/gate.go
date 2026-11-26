@@ -61,6 +61,7 @@ type Gate struct {
 	State      State
 	Transport  http.RoundTripper
 	Now        func() time.Time
+	admission  admissionQueue
 	mu         sync.Mutex
 	Invalidate func()
 }
@@ -230,6 +231,8 @@ func operation(b []byte) ast.Operation {
 func ReadQuery(b []byte) bool { return operation(b) == ast.Query }
 func (g *Gate) RoundTrip(r *http.Request, c Caller) (result *http.Response) {
 	// One queue is deliberate: primary/secondary budgets are shared; no retries/polling.
+	g.admission.acquire(c.Lane == "cifast-m3")
+	defer g.admission.release()
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	defer func() {
