@@ -1,0 +1,59 @@
+name: Release fleet binaries
+
+on:
+  push:
+    tags:
+      - 'v0.1.0-fleet.*'
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    if: github.repository == 'chriscoveries/ghx'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Test fleet source
+        run: go test -race -count=1 ./...
+      - name: Build pinned client and gate daemon
+        env:
+          GOTOOLCHAIN: local
+          GOENV: 'off'
+          GOFLAGS: ''
+          CGO_ENABLED: '0'
+          GOOS: linux
+          GOARCH: amd64
+          GOAMD64: v1
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test -z "$(git status --porcelain)"
+          output="$RUNNER_TEMP/fleet"
+          mkdir -p "$output"
+          for binary in ghx ghxd; do
+            go build -mod=readonly -trimpath -buildvcs=true \
+              -ldflags "-s -w -X main.version=$GITHUB_REF_NAME" -o "$output/$binary" "./src/cmd/$binary"
+            (cd "$output" && sha256sum "$binary" > "$binary.sha256")
+            gzip -n -9 -c "$output/$binary" > "$output/$binary-linux-amd64.gz"
+            test "$(wc -c < "$output/$binary-linux-amd64.gz")" -le 5000000
+            printf 'GHX_TAG_BUILD revision=%s binary=%s sha256=%s\n' \
+              "$GITHUB_SHA" "$binary" "$(cut -d ' ' -f 1 "$output/$binary.sha256")"
+          done
+      - name: Publish fleet release
+        uses: softprops/action-gh-release@v2
+        with:
+          prerelease: true
+          fail_on_unmatched_files: true
+          files: |
+            ${{ runner.temp }}/fleet/ghx-linux-amd64.gz
+            ${{ runner.temp }}/fleet/ghx.sha256
+            ${{ runner.temp }}/fleet/ghxd-linux-amd64.gz
+            ${{ runner.temp }}/fleet/ghxd.sha256
